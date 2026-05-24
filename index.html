@@ -1,0 +1,2159 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>โปรแกรมจัดตารางเวร</title>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700&family=Chakra+Petch:wght@500;600;700&display=swap" rel="stylesheet">
+<link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script type="module">
+// ═══════════════════════════════════════════════
+// FIREBASE CONFIG & SYNC
+// ═══════════════════════════════════════════════
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+import { getFirestore, doc, setDoc, getDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyBxA2nqrS1-3HwkEOxLufMQ0ZoLMHPzq5g",
+  authDomain: "opd-med-cnt.firebaseapp.com",
+  projectId: "opd-med-cnt",
+  storageBucket: "opd-med-cnt.firebasestorage.app",
+  messagingSenderId: "597333093072",
+  appId: "1:597333093072:web:4538048bbbff3ebaa40cd5"
+};
+
+const fbApp = initializeApp(firebaseConfig);
+const db    = getFirestore(fbApp);
+const DOC   = doc(db, 'opd-scheduler', 'settings');
+
+const LS_KEYS = ['opd_ward_v11','opd_clinic_v11','opd_hol_v11','opd_weight_v11','opd_hide_weight_v11'];
+
+// ── sync indicator ──
+function setSyncStatus(status){
+  // status: 'synced' | 'syncing' | 'error' | 'offline'
+  const el = document.getElementById('sync-ind');
+  if(!el) return;
+  const cfg = {
+    synced:  { icon:'fa-cloud-upload-alt', color:'#3fb950', text:'Cloud synced' },
+    syncing: { icon:'fa-sync fa-spin',     color:'#d29922', text:'Syncing...' },
+    error:   { icon:'fa-exclamation-circle',color:'#f78166', text:'Sync error' },
+    offline: { icon:'fa-wifi',             color:'#7d8590', text:'Offline' },
+  }[status] || { icon:'fa-cloud', color:'#7d8590', text:'' };
+  el.innerHTML = `<i class="fas ${cfg.icon}" style="color:${cfg.color}"></i> <span style="color:${cfg.color}">${cfg.text}</span>`;
+}
+
+// ── push localStorage → Firestore (Admin only — ต้องมี _writeSecret) ──
+const _WRITE_SECRET = 'cnt-admin-2569'; // ← ต้องตรงกับ Firestore Rules
+window.fbPush = async function(){
+  if(!isAdmin) return; // Guest ไม่ push
+  try{
+    setSyncStatus('syncing');
+    const payload = { _ts: Date.now(), _writeSecret: _WRITE_SECRET };
+    LS_KEYS.forEach(k => {
+      const v = localStorage.getItem(k);
+      if(v) payload[k] = v;
+    });
+    await setDoc(DOC, payload);
+    setSyncStatus('synced');
+  } catch(e){
+    console.error('fbPush error', e);
+    setSyncStatus('error');
+  }
+};
+
+// ── pull Firestore → localStorage ──
+async function fbPull(){
+  try{
+    setSyncStatus('syncing');
+    const snap = await getDoc(DOC);
+    if(snap.exists()){
+      const data = snap.data();
+      let changed = false;
+      LS_KEYS.forEach(k => {
+        if(data[k] !== undefined){
+          const cur = localStorage.getItem(k);
+          if(cur !== data[k]){
+            localStorage.setItem(k, data[k]);
+            changed = true;
+          }
+        }
+      });
+      if(changed){
+        setSyncStatus('synced');
+        // reload เพื่อให้ data ใหม่ถูก load
+        setTimeout(() => location.reload(), 400);
+        return;
+      }
+    }
+    setSyncStatus('synced');
+  } catch(e){
+    console.error('fbPull error', e);
+    setSyncStatus('error');
+  }
+}
+
+// ── real-time listener: เมื่อเครื่องอื่น push → เครื่องนี้ pull อัตโนมัติ ──
+let _lastTs = 0;
+onSnapshot(DOC, snap => {
+  if(!snap.exists()) return;
+  const data = snap.data();
+  const ts   = data._ts || 0;
+  if(ts > _lastTs + 2000){ // ต่างกันมากกว่า 2 วิ → มีการแก้จากเครื่องอื่น
+    _lastTs = ts;
+    let changed = false;
+    LS_KEYS.forEach(k => {
+      if(data[k] !== undefined && localStorage.getItem(k) !== data[k]){
+        localStorage.setItem(k, data[k]);
+        changed = true;
+      }
+    });
+    if(changed){
+      setSyncStatus('synced');
+      setTimeout(() => location.reload(), 600);
+    }
+  }
+}, err => {
+  console.error('onSnapshot error', err);
+  setSyncStatus('error');
+});
+
+// ── เมื่อโหลดหน้า: pull ก่อนเสมอ ──
+window.addEventListener('DOMContentLoaded', () => {
+  fbPull();
+});
+
+// ── expose สำหรับปุ่ม manual sync ──
+window.fbManualSync = async function(){
+  await fbPull();
+  window.toast && window.toast('ดึงข้อมูลล่าสุดจาก Cloud แล้ว ✓');
+};
+</script>
+<style>
+:root{
+  --bg:#0d1117;--sf:#161b22;--s2:#1c2330;--s3:#21262d;
+  --bd:#30363d;--bd2:#3d444d;
+  --tx:#e6edf3;--mu:#7d8590;
+  --ac:#2ea4ff;--ac2:#f78166;
+  --gn:#3fb950;--ye:#d29922;--pu:#bc8cff;
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:'Sarabun',sans-serif;background:var(--bg);color:var(--tx);min-height:100vh;}
+
+header{
+  background:linear-gradient(90deg,#0a1628,#162040,#0a1628);
+  border-bottom:1px solid var(--bd);
+  padding:0 1.5rem;height:58px;
+  display:flex;align-items:center;justify-content:space-between;
+  position:sticky;top:0;z-index:300;
+}
+.brand{display:flex;align-items:center;gap:11px;}
+.bicon{width:34px;height:34px;border-radius:8px;background:linear-gradient(135deg,#2ea4ff,#bc8cff);display:flex;align-items:center;justify-content:center;font-size:.95rem;color:#fff;}
+.brand h1{font-family:'Chakra Petch',sans-serif;font-size:.95rem;font-weight:600;}
+.brand p{font-size:.68rem;color:var(--mu);}
+.save-indicator{display:flex;align-items:center;gap:6px;font-size:.75rem;color:var(--gn);}
+.save-indicator.dirty{color:var(--ye);}
+
+.tab-bar{background:var(--sf);border-bottom:1px solid var(--bd);padding:0 1.5rem;display:flex;overflow-x:auto;gap:0;}
+.tab-btn{background:none;border:none;color:var(--mu);padding:.58rem 1rem;font-family:'Sarabun',sans-serif;font-size:.8rem;font-weight:600;cursor:pointer;border-bottom:2px solid transparent;display:flex;align-items:center;gap:5px;transition:all .15s;white-space:nowrap;flex-shrink:0;}
+.tab-btn:hover{color:var(--tx);}
+.tab-btn.active{color:var(--ac);border-bottom-color:var(--ac);}
+
+main{max-width:1500px;margin:0 auto;padding:1.4rem 1.2rem;}
+.tab-panel{display:none;animation:fadeIn .2s ease;}
+.tab-panel.active{display:block;}
+@keyframes fadeIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+
+.card{background:var(--sf);border:1px solid var(--bd);border-radius:11px;padding:1.2rem;margin-bottom:1.2rem;}
+.card-title{font-family:'Chakra Petch',sans-serif;font-size:.85rem;font-weight:600;color:var(--tx);margin-bottom:.85rem;padding-bottom:.6rem;border-bottom:1px solid var(--bd);display:flex;align-items:center;gap:7px;flex-wrap:wrap;}
+.card-title i{color:var(--ac);}
+.ml{margin-left:auto;}
+
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:1.2rem;}
+.g3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:1.1rem;}
+.g5{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;}
+@media(max-width:900px){.g2,.g3,.g5{grid-template-columns:1fr;}}
+
+.fg{margin-bottom:.78rem;}
+label.lbl{display:block;font-size:.72rem;font-weight:700;color:var(--mu);margin-bottom:3px;text-transform:uppercase;letter-spacing:.05em;}
+input,select,textarea{width:100%;padding:.44rem .72rem;background:var(--s3);border:1px solid var(--bd2);border-radius:6px;font-family:'Sarabun',sans-serif;font-size:.84rem;color:var(--tx);outline:none;transition:border .15s;}
+input:focus,select:focus,textarea:focus{border-color:var(--ac);background:rgba(46,164,255,.04);}
+select option{background:var(--s3);}
+
+.btn{display:inline-flex;align-items:center;gap:5px;padding:.44rem .9rem;border-radius:6px;font-family:'Sarabun',sans-serif;font-size:.81rem;font-weight:600;border:none;cursor:pointer;transition:all .15s;}
+.btn-primary{background:var(--ac);color:#fff;}.btn-primary:hover{filter:brightness(1.12);}
+.btn-success{background:var(--gn);color:#fff;}.btn-success:hover{filter:brightness(1.1);}
+.btn-danger{background:var(--ac2);color:#fff;}.btn-danger:hover{filter:brightness(1.1);}
+.btn-warn{background:var(--ye);color:#1a1000;}.btn-warn:hover{filter:brightness(1.12);}
+.btn-ghost{background:var(--s3);color:var(--tx);border:1px solid var(--bd2);}.btn-ghost:hover{border-color:var(--ac);color:var(--ac);}
+.btn-sm{padding:.24rem .58rem;font-size:.73rem;}
+.btn-group{display:flex;gap:7px;flex-wrap:wrap;margin-top:.72rem;}
+
+.alert{border-radius:7px;padding:.62rem .82rem;margin-bottom:.78rem;font-size:.8rem;display:flex;align-items:flex-start;gap:7px;line-height:1.5;}
+.a-info{background:#0d2840;color:#7ec8ff;border-left:3px solid var(--ac);}
+.a-warn{background:#2a1f0a;color:#f0c060;border-left:3px solid var(--ye);}
+.a-success{background:#0d2a18;color:#7ddb9a;border-left:3px solid var(--gn);}
+
+/* TABLE */
+.tbl-wrap{overflow-x:auto;}
+table{width:100%;border-collapse:collapse;font-size:.78rem;}
+th{background:var(--s3);color:var(--mu);padding:.5rem .65rem;text-align:left;font-weight:700;font-size:.68rem;text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid var(--bd2);}
+td{padding:.44rem .65rem;border-bottom:1px solid var(--bd);vertical-align:middle;}
+tr:hover td{background:rgba(46,164,255,.035);}
+
+/* WARD CHIPS */
+.wc{padding:2px 7px;border-radius:4px;font-size:.73rem;font-weight:600;display:inline-block;white-space:nowrap;margin:1px;}
+.wc-opd{background:#0d2840;color:#7ec8ff;}
+.wc-icu{background:#3a1212;color:#ff9090;}
+.wc-stroke{background:#2a1a50;color:#c8a0ff;}
+.wc-med{background:#12301a;color:#7ddb9a;}
+.wc-ward{background:#2a1e00;color:#f0c060;}
+.wc-other{background:var(--s3);color:var(--mu);}
+.half-tag{font-size:.64rem;font-weight:700;padding:1px 5px;background:var(--s3);border:1px solid var(--bd2);border-radius:3px;color:var(--mu);display:inline-block;}
+.mhdr{font-family:'Chakra Petch',sans-serif;font-size:.67rem;font-weight:600;color:var(--ac);letter-spacing:.04em;padding:2px 6px;background:rgba(46,164,255,.1);border-radius:3px;display:inline-block;}
+
+/* OPD SLOTS */
+.opd-slot{display:inline-block;padding:2px 8px;border-radius:4px;background:#0d2840;color:#7ec8ff;font-size:.73rem;font-weight:600;margin:1px;white-space:nowrap;}
+.clinic-slot{display:inline-block;padding:2px 8px;border-radius:4px;background:#281800;color:#f0b040;font-size:.73rem;font-weight:600;margin:1px;white-space:nowrap;border:1px solid rgba(240,176,64,.25);}
+.holiday-row td{background:rgba(247,129,102,.04)!important;}
+
+/* STATS */
+.stat-row{display:grid;grid-template-columns:repeat(auto-fill,minmax(115px,1fr));gap:8px;margin-bottom:1.1rem;}
+.stat-box{background:var(--s2);border:1px solid var(--bd);border-radius:9px;padding:.8rem;text-align:center;}
+.stat-num{font-family:'Chakra Petch',sans-serif;font-size:1.7rem;font-weight:700;color:var(--ac);}
+.stat-lbl{font-size:.68rem;color:var(--mu);margin-top:2px;}
+
+/* PROGRESS */
+.prog{background:var(--bd);border-radius:3px;height:5px;margin-top:3px;overflow:hidden;}
+.prog-o{background:var(--ac);border-radius:3px 0 0 3px;height:100%;display:inline-block;float:left;}
+.prog-c{background:var(--ye);border-radius:0 3px 3px 0;height:100%;display:inline-block;float:left;}
+
+/* DOCTOR EDIT */
+.doc-row{display:flex;align-items:center;gap:7px;padding:.38rem .6rem;border-bottom:1px solid var(--bd);transition:background .12s;}
+.doc-row:hover{background:var(--s2);}
+.doc-seq{width:28px;font-size:.72rem;color:var(--mu);flex-shrink:0;text-align:center;}
+.doc-inp{flex:1;background:transparent!important;border:none!important;border-bottom:1px dashed var(--bd2)!important;border-radius:0!important;padding:.22rem .3rem!important;font-size:.85rem!important;}
+.doc-inp:focus{background:rgba(46,164,255,.06)!important;border-bottom-color:var(--ac)!important;}
+.nbadge{font-size:.65rem;color:var(--pu);background:rgba(188,140,255,.15);padding:1px 6px;border-radius:3px;flex-shrink:0;}
+
+/* CLINIC */
+.week-block{background:var(--s2);border:1px solid var(--bd);border-radius:9px;padding:.85rem;margin-bottom:.8rem;}
+.week-hdr{font-family:'Chakra Petch',sans-serif;font-size:.72rem;font-weight:700;color:var(--ye);margin-bottom:.65rem;display:flex;align-items:center;gap:7px;}
+.day-col{background:var(--sf);border:1px solid var(--bd);border-radius:7px;padding:.6rem;}
+.day-lbl{font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--mu);margin-bottom:.4rem;}
+.ctags{display:flex;flex-wrap:wrap;gap:3px;min-height:22px;margin-bottom:.4rem;}
+.ctag{display:inline-flex;align-items:center;gap:3px;background:#281800;color:#f0b040;border:1px solid rgba(240,176,64,.25);border-radius:4px;padding:2px 7px;font-size:.74rem;font-weight:600;}
+.ctag-x{cursor:pointer;color:rgba(240,176,64,.4);font-size:.68rem;margin-left:1px;}.ctag-x:hover{color:var(--ac2);}
+.cadd-row{display:flex;gap:4px;align-items:center;}
+.cadd-sel{flex:1;font-size:.72rem!important;padding:.2rem .4rem!important;}
+.cadd-btn{padding:.2rem .5rem!important;font-size:.72rem!important;}
+
+/* HOL TAGS */
+.hol-tag{display:inline-flex;align-items:center;gap:5px;background:var(--s2);border:1px solid var(--bd2);border-radius:5px;padding:2px 8px;font-size:.75rem;}
+.hol-rm{cursor:pointer;color:var(--mu);}.hol-rm:hover{color:var(--ac2);}
+
+/* TOAST */
+#toast{position:fixed;bottom:1.4rem;right:1.4rem;z-index:9999;background:var(--sf);border:1px solid var(--bd2);color:var(--tx);padding:.62rem 1.1rem;border-radius:8px;font-size:.82rem;font-weight:500;box-shadow:0 8px 28px rgba(0,0,0,.55);transform:translateY(70px);opacity:0;transition:all .25s;max-width:260px;}
+#toast.show{transform:translateY(0);opacity:1;}
+#toast.toast-ok{border-left:3px solid var(--gn);}
+#toast.toast-err{border-left:3px solid var(--ac2);}
+
+/* SAVE PULSE */
+@keyframes pulse{0%{opacity:1}50%{opacity:.4}100%{opacity:1}}
+.saving{animation:pulse .8s infinite;}
+</style>
+</head>
+<body>
+
+<!-- ═══ LOGIN OVERLAY ═══ -->
+<div id="pw-overlay" style="
+  position:fixed;inset:0;z-index:9999;
+  background:linear-gradient(135deg,#0a1628,#162040,#0a1628);
+  display:flex;align-items:center;justify-content:center;
+">
+  <div style="
+    background:#161b22;border:1px solid #30363d;border-radius:16px;
+    padding:2.5rem 2rem;width:340px;text-align:center;
+    box-shadow:0 20px 60px rgba(0,0,0,.5);
+  ">
+    <div style="width:52px;height:52px;border-radius:12px;background:linear-gradient(135deg,#2ea4ff,#bc8cff);display:flex;align-items:center;justify-content:center;margin:0 auto 1.2rem;font-size:1.4rem">🏥</div>
+    <div style="font-family:'Chakra Petch',sans-serif;font-size:1.1rem;font-weight:700;color:#e6edf3;margin-bottom:.3rem">โปรแกรมจัดตารางเวร</div>
+    <div style="font-size:.78rem;color:#7d8590;margin-bottom:1.6rem">OPD · Ward · Clinic — CNT</div>
+    <input type="password" id="pw-input" placeholder="รหัสผ่าน" onkeydown="if(event.key==='Enter')checkPW()"
+      style="width:100%;padding:.6rem 1rem;background:#21262d;border:1px solid #3d444d;border-radius:8px;
+             color:#e6edf3;font-family:'Sarabun',sans-serif;font-size:.95rem;outline:none;
+             text-align:center;letter-spacing:.15em;margin-bottom:.8rem">
+    <button onclick="checkPW()" style="
+      width:100%;padding:.65rem;background:linear-gradient(135deg,#2ea4ff,#bc8cff);
+      border:none;border-radius:8px;color:#fff;font-family:'Sarabun',sans-serif;
+      font-size:.95rem;font-weight:700;cursor:pointer;margin-bottom:.6rem
+    ">เข้าสู่ระบบ</button>
+    <div style="font-size:.72rem;color:#3d444d;margin-top:.3rem">กรุณาใส่รหัสผ่านเพื่อเข้าใช้งาน</div>
+    <div id="pw-err" style="font-size:.78rem;color:#f78166;min-height:1.2em"></div>
+  </div>
+</div>
+
+<script>
+const _PW_ADMIN = 'cnt2569';   // ← Admin: แก้ไขได้ทุกอย่าง
+const _PW_STAFF = 'cntstaff'; // ← Staff: ดูได้อย่างเดียว (เปลี่ยนได้)
+let isAdmin = false;
+
+function checkPW(){
+  const v = document.getElementById('pw-input').value.trim();
+  if(v === _PW_ADMIN){
+    isAdmin = true;
+    sessionStorage.setItem('opd_auth','admin');
+    document.getElementById('pw-overlay').style.display='none';
+    applyAuthMode();
+  } else if(v === _PW_STAFF){
+    isAdmin = false;
+    sessionStorage.setItem('opd_auth','guest');
+    document.getElementById('pw-overlay').style.display='none';
+    applyAuthMode();
+  } else {
+    const err = document.getElementById('pw-err');
+    err.textContent = 'รหัสผ่านไม่ถูกต้อง';
+    document.getElementById('pw-input').value='';
+    document.getElementById('pw-input').focus();
+    setTimeout(()=>{ err.textContent=''; }, 2000);
+  }
+}
+
+function applyAuthMode(){
+  const adminEls = document.querySelectorAll('.admin-only');
+  adminEls.forEach(el => { el.style.display = isAdmin ? '' : 'none'; });
+  const badge = document.getElementById('auth-badge');
+  if(badge){
+    badge.innerHTML = isAdmin
+      ? `<span style="color:var(--gn);font-size:.72rem"><i class="fas fa-shield-alt"></i> Admin</span>`
+      : `<span style="color:var(--mu);font-size:.72rem"><i class="fas fa-eye"></i> Staff (ดูอย่างเดียว)</span>
+         <button onclick="sessionStorage.clear();location.reload()" style="background:none;border:1px solid var(--bd2);border-radius:4px;color:var(--mu);font-size:.68rem;padding:1px 6px;cursor:pointer;margin-left:4px">เปลี่ยน</button>`;
+  }
+}
+
+// restore session
+const _savedAuth = sessionStorage.getItem('opd_auth');
+if(_savedAuth === 'admin'){ isAdmin=true; document.getElementById('pw-overlay').style.display='none'; }
+else if(_savedAuth === 'guest'){ isAdmin=false; document.getElementById('pw-overlay').style.display='none'; }
+
+window.addEventListener('DOMContentLoaded',()=>{
+  if(document.getElementById('pw-overlay').style.display!=='none')
+    document.getElementById('pw-input').focus();
+  applyAuthMode();
+});
+</script>
+<header>
+  <div class="brand">
+    <div class="bicon"><i class="fas fa-hospital-alt"></i></div>
+    <div><h1>โปรแกรมจัดตารางเวร</h1><p>OPD Duty · Ward Rotation · Clinic Schedule</p></div>
+  </div>
+  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+    <div id="auth-badge"></div>
+    <div class="save-indicator" id="save-ind">
+      <i class="fas fa-check-circle"></i> <span id="save-txt">บันทึกแล้ว</span>
+    </div>
+    <div id="sync-ind" style="display:flex;align-items:center;gap:5px;font-size:.75rem">
+      <i class="fas fa-sync fa-spin" style="color:#d29922"></i> <span style="color:#d29922">Connecting...</span>
+    </div>
+    <button class="btn btn-ghost btn-sm" onclick="fbManualSync()" style="font-size:.72rem;padding:.28rem .7rem" title="ดึงข้อมูลล่าสุดจาก Cloud">
+      <i class="fas fa-cloud-download-alt"></i> Pull
+    </button>
+    <button class="btn btn-ghost btn-sm" onclick="exportSettings()" style="font-size:.72rem;padding:.28rem .7rem">
+      <i class="fas fa-download"></i> Export
+    </button>
+    <label class="btn btn-ghost btn-sm" style="font-size:.72rem;padding:.28rem .7rem;cursor:pointer;margin:0">
+      <i class="fas fa-upload"></i> Import
+      <input type="file" accept=".json" onchange="importSettings(this)" style="display:none">
+    </label>
+  </div>
+</header>
+
+<div class="tab-bar">
+  <button class="tab-btn active" onclick="goTab('ward',this)"><i class="fas fa-table"></i> Loop วอร์ด</button>
+  <button class="tab-btn" class="admin-only" onclick="goTab('doctors',this)"><i class="fas fa-user-edit"></i> แก้ชื่อแพทย์</button>
+  <button class="tab-btn" class="admin-only" onclick="goTab('clinic',this)"><i class="fas fa-star"></i> คลินิกพิเศษ</button>
+  <button class="tab-btn" onclick="goTab('opd',this)"><i class="fas fa-calendar-check"></i> ตาราง OPD</button>
+  <button class="tab-btn" onclick="goTab('summary',this)"><i class="fas fa-chart-bar"></i> สรุปภาระงาน</button>
+  <button class="tab-btn" class="admin-only" onclick="goTab('holidays',this)"><i class="fas fa-calendar-times"></i> วันหยุด</button>
+  <button class="tab-btn" class="admin-only" onclick="goTab('weights',this)"><i class="fas fa-sliders-h"></i> ตัวคูณคลินิก</button>
+  <button class="tab-btn" onclick="goTab('import',this)"><i class="fas fa-file-import"></i> Import นับภาระ</button>
+</div>
+
+<main>
+
+<!-- ═══ WARD ═══ -->
+<div id="tab-ward" class="tab-panel active">
+  <div class="alert a-info"><i class="fas fa-info-circle"></i><div>ตาราง Loop วอร์ด กรกฎาคม 2569 – ธันวาคม 2571 (คำนวณจาก Pattern อัตโนมัติ) — แก้ชื่อแพทย์ได้ที่แท็บ <b>แก้ชื่อแพทย์</b></div></div>
+  <div class="card">
+    <div class="card-title"><i class="fas fa-table"></i> ตาราง Loop วอร์ด
+      <div class="ml" style="display:flex;gap:6px">
+        <button class="btn btn-ghost btn-sm" class="admin-only" onclick="resetToDefault()"><i class="fas fa-undo"></i> รีเซ็ต</button>
+        <button class="btn btn-success btn-sm" onclick="exportWard()"><i class="fas fa-file-excel"></i> Export</button>
+      </div>
+    </div>
+    <div class="tbl-wrap" id="ward-tbl"></div>
+  </div>
+</div>
+
+<!-- ═══ DOCTORS ═══ -->
+<div id="tab-doctors" class="tab-panel">
+  <div class="card">
+    <div class="card-title"><i class="fas fa-user-edit"></i> แก้ไขชื่อแพทย์</div>
+    <div class="alert a-warn"><i class="fas fa-exclamation-triangle"></i><div>แก้ชื่อแล้วกด <b>บันทึก</b> — ระบบอัปเดตทุกตารางและคลินิกพิเศษด้วย และบันทึกลง Browser ทันที</div></div>
+    <div id="doc-edit-list"></div>
+    <div class="btn-group">
+      <button class="btn btn-primary" class="admin-only" onclick="saveDoctorNames()"><i class="fas fa-save"></i> บันทึกชื่อทั้งหมด</button>
+      <button class="btn btn-ghost" onclick="renderDocEdit()"><i class="fas fa-undo"></i> ยกเลิก</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ CLINIC ═══ -->
+<div id="tab-clinic" class="tab-panel">
+  <div class="alert a-warn"><i class="fas fa-star"></i><div>คลินิกพิเศษ = <b>1.5 งาน OPD</b> (ปรับรายคนได้ที่แท็บ <b>ตัวคูณคลินิก</b>) — วันที่มีคลินิกพิเศษจะ<b>ไม่ออก OPD ทั่วไป</b> | บันทึกอัตโนมัติ | แพทย์ไม่มีคลินิก: OPD มากกว่า max(total คนมีคลินิก) + 2 วัน แต่ไม่เกิน + 3 วัน</div></div>
+  <div class="card">
+    <div class="card-title"><i class="fas fa-edit"></i> ตารางคลินิกพิเศษ (สัปดาห์ที่ 1–5)
+      <div class="ml" style="display:flex;gap:6px">
+        <button class="btn btn-success btn-sm" onclick="exportClinic()"><i class="fas fa-file-excel"></i> Export</button>
+      </div>
+    </div>
+    <div id="clinic-editor"></div>
+  </div>
+</div>
+
+<!-- ═══ OPD ═══ -->
+<div id="tab-opd" class="tab-panel">
+  <div class="card">
+    <div class="card-title"><i class="fas fa-sliders-h"></i> ตั้งค่าตาราง OPD</div>
+    <div class="g3">
+      <div class="fg"><label class="lbl">เดือน</label>
+        <select id="opd-month">
+          <option value="0">มกราคม</option>
+          <option value="1">กุมภาพันธ์</option>
+          <option value="2">มีนาคม</option>
+          <option value="3">เมษายน</option>
+          <option value="4">พฤษภาคม</option>
+          <option value="5">มิถุนายน</option>
+          <option value="6" selected>กรกฎาคม</option>
+          <option value="7">สิงหาคม</option>
+          <option value="8">กันยายน</option>
+          <option value="9">ตุลาคม</option>
+          <option value="10">พฤศจิกายน</option>
+          <option value="11">ธันวาคม</option>
+        </select>
+      </div>
+      <div class="fg"><label class="lbl">ปี (พ.ศ.)</label><input type="number" id="opd-year" value="2569"></div>
+      <div class="fg"><label class="lbl">แพทย์ OPD/วัน</label><input type="number" id="opd-per-day" value="4" min="1" max="12"></div>
+    </div>
+
+    <div class="btn-group">
+      <button class="btn btn-primary" class="admin-only" onclick="genOPD()"><i class="fas fa-magic"></i> สร้างตาราง OPD</button>
+      <button class="btn btn-warn" class="admin-only" onclick="reshuffleOPD()"><i class="fas fa-random"></i> จัดใหม่</button>
+      <button class="btn btn-success" onclick="exportOPD()"><i class="fas fa-file-excel"></i> Export Excel</button>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-title"><i class="fas fa-calendar-check"></i> ตาราง OPD รายวัน <span id="opd-label" style="font-weight:400;color:var(--mu);font-size:.78rem"></span></div>
+    <div id="opd-wrap"><div style="text-align:center;padding:2rem;color:var(--mu)"><i class="fas fa-calendar-alt" style="font-size:2rem;opacity:.3;display:block;margin-bottom:.5rem"></i>กดสร้างตาราง OPD</div></div>
+  </div>
+</div>
+
+<!-- ═══ SUMMARY ═══ -->
+<div id="tab-summary" class="tab-panel">
+  <div id="summary-wrap"><div style="text-align:center;padding:2rem;color:var(--mu)"><i class="fas fa-chart-bar" style="font-size:2rem;opacity:.3;display:block;margin-bottom:.5rem"></i>สร้างตาราง OPD ก่อน</div></div>
+</div>
+
+<!-- ═══ HOLIDAYS ═══ -->
+<div id="tab-holidays" class="tab-panel">
+  <div class="card">
+    <div class="card-title"><i class="fas fa-calendar-times"></i> วันหยุดนักขัตฤกษ์ไทย</div>
+    <div class="alert a-info" style="margin-bottom:1rem">
+      <i class="fas fa-flag"></i>
+      <div>โหลดวันหยุดราชการไทยอัตโนมัติ — ครอบคลุมปี 2568 ครบทุกวัน รวมวันหยุดชดเชยและวันหยุดพิเศษ ครม.</div>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:1.2rem;align-items:center">
+      <span style="font-size:.73rem;color:var(--mu)">โหลดวันหยุดไทย:</span>
+      <button class="btn btn-primary btn-sm" class="admin-only" onclick="loadThaiHolidays(2569)"><i class="fas fa-download"></i> 2569</button>
+      <button class="btn btn-ghost btn-sm" class="admin-only" onclick="loadThaiHolidays(2570)"><i class="fas fa-download"></i> 2570</button>
+      <button class="btn btn-ghost btn-sm" class="admin-only" onclick="loadThaiHolidays(2571)"><i class="fas fa-download"></i> 2571</button>
+      <button class="btn btn-ghost btn-sm" class="admin-only" onclick="loadThaiHolidays(2568)"><i class="fas fa-download"></i> 2568</button>
+      <button class="btn btn-danger btn-sm" class="admin-only" onclick="clearAllHol()" style="margin-left:auto"><i class="fas fa-trash"></i> ล้างทั้งหมด</button>
+    </div>
+    <div class="g2">
+      <div>
+        <div class="fg"><label class="lbl">เพิ่มวันหยุดเพิ่มเติม</label><input type="date" id="hol-date"></div>
+        <div class="fg"><label class="lbl">ชื่อวันหยุด</label><input type="text" id="hol-name" placeholder="เช่น วันหยุดพิเศษ"></div>
+        <button class="btn btn-primary" class="admin-only" onclick="addHol()"><i class="fas fa-plus"></i> เพิ่ม</button>
+      </div>
+      <div>
+        <div class="alert a-warn"><i class="fas fa-exclamation-triangle"></i>วันหยุดจะถูกข้ามในตาราง OPD | บันทึกอัตโนมัติ</div>
+        <div id="hol-count" style="font-size:.78rem;color:var(--mu);margin:.4rem 0"></div>
+        <div id="hol-list" style="display:flex;flex-wrap:wrap;gap:5px;margin-top:.3rem"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ═══ WEIGHTS ═══ -->
+<div id="tab-weights" class="tab-panel">
+  <div class="alert a-info"><i class="fas fa-info-circle"></i><div>ปรับตัวคูณภาระงานคลินิกพิเศษแต่ละคน — ค่า default = 1.5 | บันทึกอัตโนมัติ</div></div>
+  <div class="card">
+    <div class="card-title"><i class="fas fa-sliders-h"></i> ตัวคูณคลินิกพิเศษรายคน
+      <div class="ml" style="display:flex;gap:8px;align-items:center">
+        <label style="font-size:.76rem;font-weight:600;color:var(--mu);display:flex;align-items:center;gap:6px;cursor:pointer">
+          <input type="checkbox" id="hide-weight-toggle" onchange="toggleHideWeight(this.checked)" style="width:auto;accent-color:var(--ac)">
+          ซ่อน badge ตัวคูณในหน้าสรุป
+        </label>
+        <button class="btn btn-ghost btn-sm" class="admin-only" onclick="resetAllWeights()"><i class="fas fa-undo"></i> รีเซ็ตทั้งหมด</button>
+      </div>
+    </div>
+    <div class="alert a-warn" style="margin-bottom:.9rem"><i class="fas fa-exclamation-triangle"></i><div>
+      ตัวคูณ <b>1.5</b> = คลินิกพิเศษ 1 ครั้ง นับเท่ากับ OPD 1.5 ครั้ง &nbsp;|&nbsp;
+      ตัวคูณ <b>1.0</b> = นับเท่า OPD ปกติ &nbsp;|&nbsp;
+      ตัวคูณ <b>0</b> = ไม่นับเป็นภาระ
+    </div></div>
+    <div id="weight-editor"></div>
+  </div>
+</div>
+<!-- ═══ IMPORT ═══ -->
+<div id="tab-import" class="tab-panel">
+  <div class="alert a-info"><i class="fas fa-file-import"></i><div>
+    อ่านไฟล์ Excel ตารางเวร OPD — ระบบจะนับชื่อแพทย์ในคอลัมน์ <b>OPD 1, OPD 2, OPD 3, OPD 4</b> โดยอัตโนมัติ แล้วแสดงสรุปรายคน
+  </div></div>
+
+  <div class="card">
+    <div class="card-title"><i class="fas fa-upload"></i> อัปโหลดไฟล์ Excel</div>
+    <div style="display:flex;gap:1rem;flex-wrap:wrap;align-items:flex-start">
+      <div class="fg" style="flex:1;min-width:220px">
+        <label class="lbl">เลือกไฟล์ Excel (.xlsx / .xls)</label>
+        <input type="file" id="import-file" accept=".xlsx,.xls" onchange="handleImport(this)" style="cursor:pointer">
+      </div>
+      <div class="fg" style="min-width:180px">
+        <label class="lbl">คอลัมน์ OPD (header row ที่เท่าไหร่)</label>
+        <input type="number" id="import-header-row" value="2" min="1" max="10" style="width:100px">
+        <div style="font-size:.7rem;color:var(--mu);margin-top:3px">ปกติแถวที่ 2 (แถว 1 = ชื่อตาราง)</div>
+      </div>
+      <div class="fg" style="min-width:140px">
+        <label class="lbl">ชื่อ sheet (ว่าง = sheet แรก)</label>
+        <input type="text" id="import-sheet-name" placeholder="Sheet1">
+      </div>
+    </div>
+    <div id="import-col-detect" style="margin-top:.5rem;font-size:.78rem;color:var(--mu)"></div>
+  </div>
+
+  <div id="import-result" style="display:none">
+    <div class="card">
+      <div class="card-title"><i class="fas fa-table"></i> สรุปภาระงาน OPD จากไฟล์
+        <div class="ml" style="display:flex;gap:6px">
+          <span id="import-file-label" style="font-size:.73rem;color:var(--mu);font-weight:400"></span>
+          <button class="btn btn-success btn-sm" onclick="exportImportResult()"><i class="fas fa-file-excel"></i> Export สรุป</button>
+        </div>
+      </div>
+      <div id="import-stats-bar" style="display:flex;gap:1.5rem;flex-wrap:wrap;font-size:.78rem;padding:.5rem .2rem 1rem;border-bottom:1px solid var(--bd);margin-bottom:1rem"></div>
+      <div class="tbl-wrap">
+        <table style="width:100%;border-collapse:collapse" id="import-table">
+          <thead>
+            <tr style="background:var(--s3)">
+              <th style="padding:.5rem .8rem;text-align:left;font-size:.78rem;color:var(--mu);font-weight:700;border-bottom:1px solid var(--bd)">#</th>
+              <th style="padding:.5rem .8rem;text-align:left;font-size:.78rem;color:var(--mu);font-weight:700;border-bottom:1px solid var(--bd)">ชื่อแพทย์</th>
+              <th style="padding:.5rem .8rem;text-align:center;font-size:.78rem;color:var(--mu);font-weight:700;border-bottom:1px solid var(--bd)">จำนวน OPD (วัน)</th>
+              <th style="padding:.5rem .8rem;text-align:left;font-size:.78rem;color:var(--mu);font-weight:700;border-bottom:1px solid var(--bd)">สัดส่วน</th>
+            </tr>
+          </thead>
+          <tbody id="import-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- วันที่ออก OPD รายคน -->
+    <div class="card" id="import-detail-card" style="display:none">
+      <div class="card-title"><i class="fas fa-list-alt"></i> วันที่ออก OPD — <span id="import-detail-name"></span></div>
+      <div id="import-detail-days" style="display:flex;flex-wrap:wrap;gap:5px;font-size:.78rem"></div>
+    </div>
+  </div>
+</div>
+</main>
+<div id="toast"></div>
+
+<script>
+// ═══════════════════════════════════════════════
+// CONSTANTS
+// ═══════════════════════════════════════════════
+const MONTHS_TH=['มกราคม','กุมภาพันธ์','มีนาคม','เมษายน','พฤษภาคม','มิถุนายน','กรกฎาคม','สิงหาคม','กันยายน','ตุลาคม','พฤศจิกายน','ธันวาคม'];
+const DAYS_S=['','จ.','อ.','พ.','พฤ.','ศ.'];
+const DAYS_F=['','จันทร์','อังคาร','พุธ','พฤหัสบดี','ศุกร์'];
+const LS_WARD='opd_ward_v11';
+const LS_CLINIC='opd_clinic_v11';
+const LS_HOL='opd_hol_v11';
+
+// ═══════════════════════════════════════════════
+// DEFAULT DATA
+// ═══════════════════════════════════════════════
+const DEFAULT_WARD = {"monthColumns":["กรกฎาคม 2569","สิงหาคม 2569","กันยายน 2569","ตุลาคม 2569","พฤศจิกายน 2569","ธันวาคม 2569","มกราคม 2570","กุมภาพันธ์ 2570","มีนาคม 2570","เมษายน 2570","พฤษภาคม 2570","มิถุนายน 2570","กรกฎาคม 2570","สิงหาคม 2570","กันยายน 2570","ตุลาคม 2570","พฤศจิกายน 2570","ธันวาคม 2570","มกราคม 2571","กุมภาพันธ์ 2571","มีนาคม 2571","เมษายน 2571","พฤษภาคม 2571","มิถุนายน 2571","กรกฎาคม 2571","สิงหาคม 2571","กันยายน 2571","ตุลาคม 2571","พฤศจิกายน 2571","ธันวาคม 2571"],"doctors":[{"seq":1,"name":"ชลิตา","isNP":false,"schedule":{"กรกฎาคม 2569":{"h1":"ฟ้า6","h2":"OPD 8"},"สิงหาคม 2569":{"h1":"Med หญิง","h2":"OPD 3"},"กันยายน 2569":{"h1":"Med ชาย","h2":"OPD 1"},"ตุลาคม 2569":{"h1":"ICU","h2":"OPD7"},"พฤศจิกายน 2569":{"h1":"OPD 2","h2":"ปู่-นิล"},"ธันวาคม 2569":{"h1":"OPD 4","h2":"Med 3"},"มกราคม 2570":{"h1":"OPD 6","h2":"ฟ้า5"},"กุมภาพันธ์ 2570":{"h1":"OPD 5","h2":"ฟ้า6"},"มีนาคม 2570":{"h1":"OPD 8","h2":"Med หญิง"},"เมษายน 2570":{"h1":"OPD 3","h2":"Med ชาย"},"พฤษภาคม 2570":{"h1":"OPD 1","h2":"ICU"},"มิถุนายน 2570":{"h1":"OPD7","h2":"OPD 2"},"กรกฎาคม 2570":{"h1":"ปู่-นิล","h2":"OPD 4"},"สิงหาคม 2570":{"h1":"Med 3","h2":"OPD 6"},"กันยายน 2570":{"h1":"ฟ้า5","h2":"OPD 5"},"ตุลาคม 2570":{"h1":"ฟ้า6","h2":"OPD 8"},"พฤศจิกายน 2570":{"h1":"Med หญิง","h2":"OPD 3"},"ธันวาคม 2570":{"h1":"Med ชาย","h2":"OPD 1"},"มกราคม 2571":{"h1":"ICU","h2":"OPD7"},"กุมภาพันธ์ 2571":{"h1":"OPD 2","h2":"ปู่-นิล"},"มีนาคม 2571":{"h1":"OPD 4","h2":"Med 3"},"เมษายน 2571":{"h1":"OPD 6","h2":"ฟ้า5"},"พฤษภาคม 2571":{"h1":"OPD 5","h2":"ฟ้า6"},"มิถุนายน 2571":{"h1":"OPD 8","h2":"Med หญิง"},"กรกฎาคม 2571":{"h1":"OPD 3","h2":"Med ชาย"},"สิงหาคม 2571":{"h1":"OPD 1","h2":"ICU"},"กันยายน 2571":{"h1":"OPD7","h2":"OPD 2"},"ตุลาคม 2571":{"h1":"ปู่-นิล","h2":"OPD 4"},"พฤศจิกายน 2571":{"h1":"Med 3","h2":"OPD 6"},"ธันวาคม 2571":{"h1":"ฟ้า5","h2":"OPD 5"}}},{"seq":2,"name":"อนิวรรต","isNP":false,"schedule":{"กรกฎาคม 2569":{"h1":"OPD 8","h2":"Med หญิง"},"สิงหาคม 2569":{"h1":"OPD 3","h2":"Med ชาย"},"กันยายน 2569":{"h1":"OPD 1","h2":"ICU"},"ตุลาคม 2569":{"h1":"OPD7","h2":"OPD 2"},"พฤศจิกายน 2569":{"h1":"ปู่-นิล","h2":"OPD 4"},"ธันวาคม 2569":{"h1":"Med 3","h2":"OPD 6"},"มกราคม 2570":{"h1":"ฟ้า5","h2":"OPD 5"},"กุมภาพันธ์ 2570":{"h1":"ฟ้า6","h2":"OPD 8"},"มีนาคม 2570":{"h1":"Med หญิง","h2":"OPD 3"},"เมษายน 2570":{"h1":"Med ชาย","h2":"OPD 1"},"พฤษภาคม 2570":{"h1":"ICU","h2":"OPD7"},"มิถุนายน 2570":{"h1":"OPD 2","h2":"ปู่-นิล"},"กรกฎาคม 2570":{"h1":"OPD 4","h2":"Med 3"},"สิงหาคม 2570":{"h1":"OPD 6","h2":"ฟ้า5"},"กันยายน 2570":{"h1":"OPD 5","h2":"ฟ้า6"},"ตุลาคม 2570":{"h1":"OPD 8","h2":"Med หญิง"},"พฤศจิกายน 2570":{"h1":"OPD 3","h2":"Med ชาย"},"ธันวาคม 2570":{"h1":"OPD 1","h2":"ICU"},"มกราคม 2571":{"h1":"OPD7","h2":"OPD 2"},"กุมภาพันธ์ 2571":{"h1":"ปู่-นิล","h2":"OPD 4"},"มีนาคม 2571":{"h1":"Med 3","h2":"OPD 6"},"เมษายน 2571":{"h1":"ฟ้า5","h2":"OPD 5"},"พฤษภาคม 2571":{"h1":"ฟ้า6","h2":"OPD 8"},"มิถุนายน 2571":{"h1":"Med หญิง","h2":"OPD 3"},"กรกฎาคม 2571":{"h1":"Med ชาย","h2":"OPD 1"},"สิงหาคม 2571":{"h1":"ICU","h2":"OPD7"},"กันยายน 2571":{"h1":"OPD 2","h2":"ปู่-นิล"},"ตุลาคม 2571":{"h1":"OPD 4","h2":"Med 3"},"พฤศจิกายน 2571":{"h1":"OPD 6","h2":"ฟ้า5"},"ธันวาคม 2571":{"h1":"OPD 5","h2":"ฟ้า6"}}},{"seq":3,"name":"นิภาพร","isNP":false,"schedule":{"กรกฎาคม 2569":{"h1":"Med หญิง","h2":"OPD 3"},"สิงหาคม 2569":{"h1":"Med ชาย","h2":"OPD 1"},"กันยายน 2569":{"h1":"ICU","h2":"OPD7"},"ตุลาคม 2569":{"h1":"OPD 2","h2":"ปู่-นิล"},"พฤศจิกายน 2569":{"h1":"OPD 4","h2":"Med 3"},"ธันวาคม 2569":{"h1":"OPD 6","h2":"ฟ้า5"},"มกราคม 2570":{"h1":"OPD 5","h2":"ฟ้า6"},"กุมภาพันธ์ 2570":{"h1":"OPD 8","h2":"Med หญิง"},"มีนาคม 2570":{"h1":"OPD 3","h2":"Med ชาย"},"เมษายน 2570":{"h1":"OPD 1","h2":"ICU"},"พฤษภาคม 2570":{"h1":"OPD7","h2":"OPD 2"},"มิถุนายน 2570":{"h1":"ปู่-นิล","h2":"OPD 4"},"กรกฎาคม 2570":{"h1":"Med 3","h2":"OPD 6"},"สิงหาคม 2570":{"h1":"ฟ้า5","h2":"OPD 5"},"กันยายน 2570":{"h1":"ฟ้า6","h2":"OPD 8"},"ตุลาคม 2570":{"h1":"Med หญิง","h2":"OPD 3"},"พฤศจิกายน 2570":{"h1":"Med ชาย","h2":"OPD 1"},"ธันวาคม 2570":{"h1":"ICU","h2":"OPD7"},"มกราคม 2571":{"h1":"OPD 2","h2":"ปู่-นิล"},"กุมภาพันธ์ 2571":{"h1":"OPD 4","h2":"Med 3"},"มีนาคม 2571":{"h1":"OPD 6","h2":"ฟ้า5"},"เมษายน 2571":{"h1":"OPD 5","h2":"ฟ้า6"},"พฤษภาคม 2571":{"h1":"OPD 8","h2":"Med หญิง"},"มิถุนายน 2571":{"h1":"OPD 3","h2":"Med ชาย"},"กรกฎาคม 2571":{"h1":"OPD 1","h2":"ICU"},"สิงหาคม 2571":{"h1":"OPD7","h2":"OPD 2"},"กันยายน 2571":{"h1":"ปู่-นิล","h2":"OPD 4"},"ตุลาคม 2571":{"h1":"Med 3","h2":"OPD 6"},"พฤศจิกายน 2571":{"h1":"ฟ้า5","h2":"OPD 5"},"ธันวาคม 2571":{"h1":"ฟ้า6","h2":"OPD 8"}}},{"seq":4,"name":"ประเวศ","isNP":false,"schedule":{"กรกฎาคม 2569":{"h1":"OPD 3","h2":"Med ชาย"},"สิงหาคม 2569":{"h1":"OPD 1","h2":"ICU"},"กันยายน 2569":{"h1":"OPD7","h2":"OPD 2"},"ตุลาคม 2569":{"h1":"ปู่-นิล","h2":"OPD 4"},"พฤศจิกายน 2569":{"h1":"Med 3","h2":"OPD 6"},"ธันวาคม 2569":{"h1":"ฟ้า5","h2":"OPD 5"},"มกราคม 2570":{"h1":"ฟ้า6","h2":"OPD 8"},"กุมภาพันธ์ 2570":{"h1":"Med หญิง","h2":"OPD 3"},"มีนาคม 2570":{"h1":"Med ชาย","h2":"OPD 1"},"เมษายน 2570":{"h1":"ICU","h2":"OPD7"},"พฤษภาคม 2570":{"h1":"OPD 2","h2":"ปู่-นิล"},"มิถุนายน 2570":{"h1":"OPD 4","h2":"Med 3"},"กรกฎาคม 2570":{"h1":"OPD 6","h2":"ฟ้า5"},"สิงหาคม 2570":{"h1":"OPD 5","h2":"ฟ้า6"},"กันยายน 2570":{"h1":"OPD 8","h2":"Med หญิง"},"ตุลาคม 2570":{"h1":"OPD 3","h2":"Med ชาย"},"พฤศจิกายน 2570":{"h1":"OPD 1","h2":"ICU"},"ธันวาคม 2570":{"h1":"OPD7","h2":"OPD 2"},"มกราคม 2571":{"h1":"ปู่-นิล","h2":"OPD 4"},"กุมภาพันธ์ 2571":{"h1":"Med 3","h2":"OPD 6"},"มีนาคม 2571":{"h1":"ฟ้า5","h2":"OPD 5"},"เมษายน 2571":{"h1":"ฟ้า6","h2":"OPD 8"},"พฤษภาคม 2571":{"h1":"Med หญิง","h2":"OPD 3"},"มิถุนายน 2571":{"h1":"Med ชาย","h2":"OPD 1"},"กรกฎาคม 2571":{"h1":"ICU","h2":"OPD7"},"สิงหาคม 2571":{"h1":"OPD 2","h2":"ปู่-นิล"},"กันยายน 2571":{"h1":"OPD 4","h2":"Med 3"},"ตุลาคม 2571":{"h1":"OPD 6","h2":"ฟ้า5"},"พฤศจิกายน 2571":{"h1":"OPD 5","h2":"ฟ้า6"},"ธันวาคม 2571":{"h1":"OPD 8","h2":"Med หญิง"}}},{"seq":5,"name":"ณัฐพล","isNP":false,"schedule":{"กรกฎาคม 2569":{"h1":"Med ชาย","h2":"OPD 1"},"สิงหาคม 2569":{"h1":"ICU","h2":"OPD7"},"กันยายน 2569":{"h1":"OPD 2","h2":"ปู่-นิล"},"ตุลาคม 2569":{"h1":"OPD 4","h2":"Med 3"},"พฤศจิกายน 2569":{"h1":"OPD 6","h2":"ฟ้า5"},"ธันวาคม 2569":{"h1":"OPD 5","h2":"ฟ้า6"},"มกราคม 2570":{"h1":"OPD 8","h2":"Med หญิง"},"กุมภาพันธ์ 2570":{"h1":"OPD 3","h2":"Med ชาย"},"มีนาคม 2570":{"h1":"OPD 1","h2":"ICU"},"เมษายน 2570":{"h1":"OPD7","h2":"OPD 2"},"พฤษภาคม 2570":{"h1":"ปู่-นิล","h2":"OPD 4"},"มิถุนายน 2570":{"h1":"Med 3","h2":"OPD 6"},"กรกฎาคม 2570":{"h1":"ฟ้า5","h2":"OPD 5"},"สิงหาคม 2570":{"h1":"ฟ้า6","h2":"OPD 8"},"กันยายน 2570":{"h1":"Med หญิง","h2":"OPD 3"},"ตุลาคม 2570":{"h1":"Med ชาย","h2":"OPD 1"},"พฤศจิกายน 2570":{"h1":"ICU","h2":"OPD7"},"ธันวาคม 2570":{"h1":"OPD 2","h2":"ปู่-นิล"},"มกราคม 2571":{"h1":"OPD 4","h2":"Med 3"},"กุมภาพันธ์ 2571":{"h1":"OPD 6","h2":"ฟ้า5"},"มีนาคม 2571":{"h1":"OPD 5","h2":"ฟ้า6"},"เมษายน 2571":{"h1":"OPD 8","h2":"Med หญิง"},"พฤษภาคม 2571":{"h1":"OPD 3","h2":"Med ชาย"},"มิถุนายน 2571":{"h1":"OPD 1","h2":"ICU"},"กรกฎาคม 2571":{"h1":"OPD7","h2":"OPD 2"},"สิงหาคม 2571":{"h1":"ปู่-นิล","h2":"OPD 4"},"กันยายน 2571":{"h1":"Med 3","h2":"OPD 6"},"ตุลาคม 2571":{"h1":"ฟ้า5","h2":"OPD 5"},"พฤศจิกายน 2571":{"h1":"ฟ้า6","h2":"OPD 8"},"ธันวาคม 2571":{"h1":"Med หญิง","h2":"OPD 3"}}},{"seq":6,"name":"ปิยวดี","isNP":false,"schedule":{"กรกฎาคม 2569":{"h1":"OPD 1","h2":"ICU"},"สิงหาคม 2569":{"h1":"OPD7","h2":"OPD 2"},"กันยายน 2569":{"h1":"ปู่-นิล","h2":"OPD 4"},"ตุลาคม 2569":{"h1":"Med 3","h2":"OPD 6"},"พฤศจิกายน 2569":{"h1":"ฟ้า5","h2":"OPD 5"},"ธันวาคม 2569":{"h1":"ฟ้า6","h2":"OPD 8"},"มกราคม 2570":{"h1":"Med หญิง","h2":"OPD 3"},"กุมภาพันธ์ 2570":{"h1":"Med ชาย","h2":"OPD 1"},"มีนาคม 2570":{"h1":"ICU","h2":"OPD7"},"เมษายน 2570":{"h1":"OPD 2","h2":"ปู่-นิล"},"พฤษภาคม 2570":{"h1":"OPD 4","h2":"Med 3"},"มิถุนายน 2570":{"h1":"OPD 6","h2":"ฟ้า5"},"กรกฎาคม 2570":{"h1":"OPD 5","h2":"ฟ้า6"},"สิงหาคม 2570":{"h1":"OPD 8","h2":"Med หญิง"},"กันยายน 2570":{"h1":"OPD 3","h2":"Med ชาย"},"ตุลาคม 2570":{"h1":"OPD 1","h2":"ICU"},"พฤศจิกายน 2570":{"h1":"OPD7","h2":"OPD 2"},"ธันวาคม 2570":{"h1":"ปู่-นิล","h2":"OPD 4"},"มกราคม 2571":{"h1":"Med 3","h2":"OPD 6"},"กุมภาพันธ์ 2571":{"h1":"ฟ้า5","h2":"OPD 5"},"มีนาคม 2571":{"h1":"ฟ้า6","h2":"OPD 8"},"เมษายน 2571":{"h1":"Med หญิง","h2":"OPD 3"},"พฤษภาคม 2571":{"h1":"Med ชาย","h2":"OPD 1"},"มิถุนายน 2571":{"h1":"ICU","h2":"OPD7"},"กรกฎาคม 2571":{"h1":"OPD 2","h2":"ปู่-นิล"},"สิงหาคม 2571":{"h1":"OPD 4","h2":"Med 3"},"กันยายน 2571":{"h1":"OPD 6","h2":"ฟ้า5"},"ตุลาคม 2571":{"h1":"OPD 5","h2":"ฟ้า6"},"พฤศจิกายน 2571":{"h1":"OPD 8","h2":"Med หญิง"},"ธันวาคม 2571":{"h1":"OPD 3","h2":"Med ชาย"}}},{"seq":7,"name":"พันเทียน","isNP":false,"schedule":{"กรกฎาคม 2569":{"h1":"ICU","h2":"OPD7"},"สิงหาคม 2569":{"h1":"OPD 2","h2":"ปู่-นิล"},"กันยายน 2569":{"h1":"OPD 4","h2":"Med 3"},"ตุลาคม 2569":{"h1":"OPD 6","h2":"ฟ้า5"},"พฤศจิกายน 2569":{"h1":"OPD 5","h2":"ฟ้า6"},"ธันวาคม 2569":{"h1":"OPD 8","h2":"Med หญิง"},"มกราคม 2570":{"h1":"OPD 3","h2":"Med ชาย"},"กุมภาพันธ์ 2570":{"h1":"OPD 1","h2":"ICU"},"มีนาคม 2570":{"h1":"OPD7","h2":"OPD 2"},"เมษายน 2570":{"h1":"ปู่-นิล","h2":"OPD 4"},"พฤษภาคม 2570":{"h1":"Med 3","h2":"OPD 6"},"มิถุนายน 2570":{"h1":"ฟ้า5","h2":"OPD 5"},"กรกฎาคม 2570":{"h1":"ฟ้า6","h2":"OPD 8"},"สิงหาคม 2570":{"h1":"Med หญิง","h2":"OPD 3"},"กันยายน 2570":{"h1":"Med ชาย","h2":"OPD 1"},"ตุลาคม 2570":{"h1":"ICU","h2":"OPD7"},"พฤศจิกายน 2570":{"h1":"OPD 2","h2":"ปู่-นิล"},"ธันวาคม 2570":{"h1":"OPD 4","h2":"Med 3"},"มกราคม 2571":{"h1":"OPD 6","h2":"ฟ้า5"},"กุมภาพันธ์ 2571":{"h1":"OPD 5","h2":"ฟ้า6"},"มีนาคม 2571":{"h1":"OPD 8","h2":"Med หญิง"},"เมษายน 2571":{"h1":"OPD 3","h2":"Med ชาย"},"พฤษภาคม 2571":{"h1":"OPD 1","h2":"ICU"},"มิถุนายน 2571":{"h1":"OPD7","h2":"OPD 2"},"กรกฎาคม 2571":{"h1":"ปู่-นิล","h2":"OPD 4"},"สิงหาคม 2571":{"h1":"Med 3","h2":"OPD 6"},"กันยายน 2571":{"h1":"ฟ้า5","h2":"OPD 5"},"ตุลาคม 2571":{"h1":"ฟ้า6","h2":"OPD 8"},"พฤศจิกายน 2571":{"h1":"Med หญิง","h2":"OPD 3"},"ธันวาคม 2571":{"h1":"Med ชาย","h2":"OPD 1"}}},{"seq":8,"name":"ณัทอร","isNP":true,"schedule":{"กรกฎาคม 2569":{"h1":"OPD7","h2":"OPD 2"},"สิงหาคม 2569":{"h1":"NM + Stroke","h2":"NM + Stroke"},"กันยายน 2569":{"h1":"Med 3","h2":"OPD 6"},"ตุลาคม 2569":{"h1":"NM + Stroke","h2":"NM + Stroke"},"พฤศจิกายน 2569":{"h1":"ฟ้า6","h2":"OPD 8"},"ธันวาคม 2569":{"h1":"NM + Stroke","h2":"NM + Stroke"},"มกราคม 2570":{"h1":"Med ชาย","h2":"OPD 1"},"กุมภาพันธ์ 2570":{"h1":"NM + Stroke","h2":"NM + Stroke"},"มีนาคม 2570":{"h1":"OPD 2","h2":"ปู่-นิล"},"เมษายน 2570":{"h1":"NM + Stroke","h2":"NM + Stroke"},"พฤษภาคม 2570":{"h1":"OPD 6","h2":"ฟ้า5"},"มิถุนายน 2570":{"h1":"NM + Stroke","h2":"NM + Stroke"},"กรกฎาคม 2570":{"h1":"OPD 8","h2":"Med หญิง"},"สิงหาคม 2570":{"h1":"NM + Stroke","h2":"NM + Stroke"},"กันยายน 2570":{"h1":"OPD 1","h2":"ICU"},"ตุลาคม 2570":{"h1":"NM + Stroke","h2":"NM + Stroke"},"พฤศจิกายน 2570":{"h1":"ปู่-นิล","h2":"OPD 4"},"ธันวาคม 2570":{"h1":"NM + Stroke","h2":"NM + Stroke"},"มกราคม 2571":{"h1":"ฟ้า5","h2":"OPD 5"},"กุมภาพันธ์ 2571":{"h1":"NM + Stroke","h2":"NM + Stroke"},"มีนาคม 2571":{"h1":"Med หญิง","h2":"OPD 3"},"เมษายน 2571":{"h1":"NM + Stroke","h2":"NM + Stroke"},"พฤษภาคม 2571":{"h1":"ICU","h2":"OPD7"},"มิถุนายน 2571":{"h1":"NM + Stroke","h2":"NM + Stroke"},"กรกฎาคม 2571":{"h1":"OPD 4","h2":"Med 3"},"สิงหาคม 2571":{"h1":"NM + Stroke","h2":"NM + Stroke"},"กันยายน 2571":{"h1":"OPD 5","h2":"ฟ้า6"},"ตุลาคม 2571":{"h1":"NM + Stroke","h2":"NM + Stroke"},"พฤศจิกายน 2571":{"h1":"OPD 3","h2":"Med ชาย"},"ธันวาคม 2571":{"h1":"NM + Stroke","h2":"NM + Stroke"}}},{"seq":"8b","name":"วรเดช","isNP":true,"schedule":{"กรกฎาคม 2569":{"h1":"NM + Stroke","h2":"NM + Stroke"},"สิงหาคม 2569":{"h1":"ปู่-นิล","h2":"OPD 4"},"กันยายน 2569":{"h1":"NM + Stroke","h2":"NM + Stroke"},"ตุลาคม 2569":{"h1":"ฟ้า5","h2":"OPD 5"},"พฤศจิกายน 2569":{"h1":"NM + Stroke","h2":"NM + Stroke"},"ธันวาคม 2569":{"h1":"Med หญิง","h2":"OPD 3"},"มกราคม 2570":{"h1":"NM + Stroke","h2":"NM + Stroke"},"กุมภาพันธ์ 2570":{"h1":"ICU","h2":"OPD7"},"มีนาคม 2570":{"h1":"NM + Stroke","h2":"NM + Stroke"},"เมษายน 2570":{"h1":"OPD 4","h2":"Med 3"},"พฤษภาคม 2570":{"h1":"NM + Stroke","h2":"NM + Stroke"},"มิถุนายน 2570":{"h1":"OPD 5","h2":"ฟ้า6"},"กรกฎาคม 2570":{"h1":"NM + Stroke","h2":"NM + Stroke"},"สิงหาคม 2570":{"h1":"OPD 3","h2":"Med ชาย"},"กันยายน 2570":{"h1":"NM + Stroke","h2":"NM + Stroke"},"ตุลาคม 2570":{"h1":"OPD7","h2":"OPD 2"},"พฤศจิกายน 2570":{"h1":"NM + Stroke","h2":"NM + Stroke"},"ธันวาคม 2570":{"h1":"Med 3","h2":"OPD 6"},"มกราคม 2571":{"h1":"NM + Stroke","h2":"NM + Stroke"},"กุมภาพันธ์ 2571":{"h1":"ฟ้า6","h2":"OPD 8"},"มีนาคม 2571":{"h1":"NM + Stroke","h2":"NM + Stroke"},"เมษายน 2571":{"h1":"Med ชาย","h2":"OPD 1"},"พฤษภาคม 2571":{"h1":"NM + Stroke","h2":"NM + Stroke"},"มิถุนายน 2571":{"h1":"OPD 2","h2":"ปู่-นิล"},"กรกฎาคม 2571":{"h1":"NM + Stroke","h2":"NM + Stroke"},"สิงหาคม 2571":{"h1":"OPD 6","h2":"ฟ้า5"},"กันยายน 2571":{"h1":"NM + Stroke","h2":"NM + Stroke"},"ตุลาคม 2571":{"h1":"OPD 8","h2":"Med หญิง"},"พฤศจิกายน 2571":{"h1":"NM + Stroke","h2":"NM + Stroke"},"ธันวาคม 2571":{"h1":"OPD 1","h2":"ICU"}}},{"seq":9,"name":"กิติยา","isNP":false,"schedule":{"กรกฎาคม 2569":{"h1":"OPD 2","h2":"ปู่-นิล"},"สิงหาคม 2569":{"h1":"OPD 4","h2":"Med 3"},"กันยายน 2569":{"h1":"OPD 6","h2":"ฟ้า5"},"ตุลาคม 2569":{"h1":"OPD 5","h2":"ฟ้า6"},"พฤศจิกายน 2569":{"h1":"OPD 8","h2":"Med หญิง"},"ธันวาคม 2569":{"h1":"OPD 3","h2":"Med ชาย"},"มกราคม 2570":{"h1":"OPD 1","h2":"ICU"},"กุมภาพันธ์ 2570":{"h1":"OPD7","h2":"OPD 2"},"มีนาคม 2570":{"h1":"ปู่-นิล","h2":"OPD 4"},"เมษายน 2570":{"h1":"Med 3","h2":"OPD 6"},"พฤษภาคม 2570":{"h1":"ฟ้า5","h2":"OPD 5"},"มิถุนายน 2570":{"h1":"ฟ้า6","h2":"OPD 8"},"กรกฎาคม 2570":{"h1":"Med หญิง","h2":"OPD 3"},"สิงหาคม 2570":{"h1":"Med ชาย","h2":"OPD 1"},"กันยายน 2570":{"h1":"ICU","h2":"OPD7"},"ตุลาคม 2570":{"h1":"OPD 2","h2":"ปู่-นิล"},"พฤศจิกายน 2570":{"h1":"OPD 4","h2":"Med 3"},"ธันวาคม 2570":{"h1":"OPD 6","h2":"ฟ้า5"},"มกราคม 2571":{"h1":"OPD 5","h2":"ฟ้า6"},"กุมภาพันธ์ 2571":{"h1":"OPD 8","h2":"Med หญิง"},"มีนาคม 2571":{"h1":"OPD 3","h2":"Med ชาย"},"เมษายน 2571":{"h1":"OPD 1","h2":"ICU"},"พฤษภาคม 2571":{"h1":"OPD7","h2":"OPD 2"},"มิถุนายน 2571":{"h1":"ปู่-นิล","h2":"OPD 4"},"กรกฎาคม 2571":{"h1":"Med 3","h2":"OPD 6"},"สิงหาคม 2571":{"h1":"ฟ้า5","h2":"OPD 5"},"กันยายน 2571":{"h1":"ฟ้า6","h2":"OPD 8"},"ตุลาคม 2571":{"h1":"Med หญิง","h2":"OPD 3"},"พฤศจิกายน 2571":{"h1":"Med ชาย","h2":"OPD 1"},"ธันวาคม 2571":{"h1":"ICU","h2":"OPD7"}}},{"seq":10,"name":"ทิฆัมพร","isNP":false,"schedule":{"กรกฎาคม 2569":{"h1":"ปู่-นิล","h2":"OPD 4"},"สิงหาคม 2569":{"h1":"Med 3","h2":"OPD 6"},"กันยายน 2569":{"h1":"ฟ้า5","h2":"OPD 5"},"ตุลาคม 2569":{"h1":"ฟ้า6","h2":"OPD 8"},"พฤศจิกายน 2569":{"h1":"Med หญิง","h2":"OPD 3"},"ธันวาคม 2569":{"h1":"Med ชาย","h2":"OPD 1"},"มกราคม 2570":{"h1":"ICU","h2":"OPD7"},"กุมภาพันธ์ 2570":{"h1":"OPD 2","h2":"ปู่-นิล"},"มีนาคม 2570":{"h1":"OPD 4","h2":"Med 3"},"เมษายน 2570":{"h1":"OPD 6","h2":"ฟ้า5"},"พฤษภาคม 2570":{"h1":"OPD 5","h2":"ฟ้า6"},"มิถุนายน 2570":{"h1":"OPD 8","h2":"Med หญิง"},"กรกฎาคม 2570":{"h1":"OPD 3","h2":"Med ชาย"},"สิงหาคม 2570":{"h1":"OPD 1","h2":"ICU"},"กันยายน 2570":{"h1":"OPD7","h2":"OPD 2"},"ตุลาคม 2570":{"h1":"ปู่-นิล","h2":"OPD 4"},"พฤศจิกายน 2570":{"h1":"Med 3","h2":"OPD 6"},"ธันวาคม 2570":{"h1":"ฟ้า5","h2":"OPD 5"},"มกราคม 2571":{"h1":"ฟ้า6","h2":"OPD 8"},"กุมภาพันธ์ 2571":{"h1":"Med หญิง","h2":"OPD 3"},"มีนาคม 2571":{"h1":"Med ชาย","h2":"OPD 1"},"เมษายน 2571":{"h1":"ICU","h2":"OPD7"},"พฤษภาคม 2571":{"h1":"OPD 2","h2":"ปู่-นิล"},"มิถุนายน 2571":{"h1":"OPD 4","h2":"Med 3"},"กรกฎาคม 2571":{"h1":"OPD 6","h2":"ฟ้า5"},"สิงหาคม 2571":{"h1":"OPD 5","h2":"ฟ้า6"},"กันยายน 2571":{"h1":"OPD 8","h2":"Med หญิง"},"ตุลาคม 2571":{"h1":"OPD 3","h2":"Med ชาย"},"พฤศจิกายน 2571":{"h1":"OPD 1","h2":"ICU"},"ธันวาคม 2571":{"h1":"OPD7","h2":"OPD 2"}}},{"seq":11,"name":"อาทร","isNP":false,"schedule":{"กรกฎาคม 2569":{"h1":"OPD 4","h2":"Med 3"},"สิงหาคม 2569":{"h1":"OPD 6","h2":"ฟ้า5"},"กันยายน 2569":{"h1":"OPD 5","h2":"ฟ้า6"},"ตุลาคม 2569":{"h1":"OPD 8","h2":"Med หญิง"},"พฤศจิกายน 2569":{"h1":"OPD 3","h2":"Med ชาย"},"ธันวาคม 2569":{"h1":"OPD 1","h2":"ICU"},"มกราคม 2570":{"h1":"OPD7","h2":"OPD 2"},"กุมภาพันธ์ 2570":{"h1":"ปู่-นิล","h2":"OPD 4"},"มีนาคม 2570":{"h1":"Med 3","h2":"OPD 6"},"เมษายน 2570":{"h1":"ฟ้า5","h2":"OPD 5"},"พฤษภาคม 2570":{"h1":"ฟ้า6","h2":"OPD 8"},"มิถุนายน 2570":{"h1":"Med หญิง","h2":"OPD 3"},"กรกฎาคม 2570":{"h1":"Med ชาย","h2":"OPD 1"},"สิงหาคม 2570":{"h1":"ICU","h2":"OPD7"},"กันยายน 2570":{"h1":"OPD 2","h2":"ปู่-นิล"},"ตุลาคม 2570":{"h1":"OPD 4","h2":"Med 3"},"พฤศจิกายน 2570":{"h1":"OPD 6","h2":"ฟ้า5"},"ธันวาคม 2570":{"h1":"OPD 5","h2":"ฟ้า6"},"มกราคม 2571":{"h1":"OPD 8","h2":"Med หญิง"},"กุมภาพันธ์ 2571":{"h1":"OPD 3","h2":"Med ชาย"},"มีนาคม 2571":{"h1":"OPD 1","h2":"ICU"},"เมษายน 2571":{"h1":"OPD7","h2":"OPD 2"},"พฤษภาคม 2571":{"h1":"ปู่-นิล","h2":"OPD 4"},"มิถุนายน 2571":{"h1":"Med 3","h2":"OPD 6"},"กรกฎาคม 2571":{"h1":"ฟ้า5","h2":"OPD 5"},"สิงหาคม 2571":{"h1":"ฟ้า6","h2":"OPD 8"},"กันยายน 2571":{"h1":"Med หญิง","h2":"OPD 3"},"ตุลาคม 2571":{"h1":"Med ชาย","h2":"OPD 1"},"พฤศจิกายน 2571":{"h1":"ICU","h2":"OPD7"},"ธันวาคม 2571":{"h1":"OPD 2","h2":"ปู่-นิล"}}},{"seq":12,"name":"กองพร","isNP":false,"schedule":{"กรกฎาคม 2569":{"h1":"Med 3","h2":"OPD 6"},"สิงหาคม 2569":{"h1":"ฟ้า5","h2":"OPD 5"},"กันยายน 2569":{"h1":"ฟ้า6","h2":"OPD 8"},"ตุลาคม 2569":{"h1":"Med หญิง","h2":"OPD 3"},"พฤศจิกายน 2569":{"h1":"Med ชาย","h2":"OPD 1"},"ธันวาคม 2569":{"h1":"ICU","h2":"OPD7"},"มกราคม 2570":{"h1":"OPD 2","h2":"ปู่-นิล"},"กุมภาพันธ์ 2570":{"h1":"OPD 4","h2":"Med 3"},"มีนาคม 2570":{"h1":"OPD 6","h2":"ฟ้า5"},"เมษายน 2570":{"h1":"OPD 5","h2":"ฟ้า6"},"พฤษภาคม 2570":{"h1":"OPD 8","h2":"Med หญิง"},"มิถุนายน 2570":{"h1":"OPD 3","h2":"Med ชาย"},"กรกฎาคม 2570":{"h1":"OPD 1","h2":"ICU"},"สิงหาคม 2570":{"h1":"OPD7","h2":"OPD 2"},"กันยายน 2570":{"h1":"ปู่-นิล","h2":"OPD 4"},"ตุลาคม 2570":{"h1":"Med 3","h2":"OPD 6"},"พฤศจิกายน 2570":{"h1":"ฟ้า5","h2":"OPD 5"},"ธันวาคม 2570":{"h1":"ฟ้า6","h2":"OPD 8"},"มกราคม 2571":{"h1":"Med หญิง","h2":"OPD 3"},"กุมภาพันธ์ 2571":{"h1":"Med ชาย","h2":"OPD 1"},"มีนาคม 2571":{"h1":"ICU","h2":"OPD7"},"เมษายน 2571":{"h1":"OPD 2","h2":"ปู่-นิล"},"พฤษภาคม 2571":{"h1":"OPD 4","h2":"Med 3"},"มิถุนายน 2571":{"h1":"OPD 6","h2":"ฟ้า5"},"กรกฎาคม 2571":{"h1":"OPD 5","h2":"ฟ้า6"},"สิงหาคม 2571":{"h1":"OPD 8","h2":"Med หญิง"},"กันยายน 2571":{"h1":"OPD 3","h2":"Med ชาย"},"ตุลาคม 2571":{"h1":"OPD 1","h2":"ICU"},"พฤศจิกายน 2571":{"h1":"OPD7","h2":"OPD 2"},"ธันวาคม 2571":{"h1":"ปู่-นิล","h2":"OPD 4"}}},{"seq":13,"name":"ชมพูนุท","isNP":false,"schedule":{"กรกฎาคม 2569":{"h1":"OPD 6","h2":"ฟ้า5"},"สิงหาคม 2569":{"h1":"OPD 5","h2":"ฟ้า6"},"กันยายน 2569":{"h1":"OPD 8","h2":"Med หญิง"},"ตุลาคม 2569":{"h1":"OPD 3","h2":"Med ชาย"},"พฤศจิกายน 2569":{"h1":"OPD 1","h2":"ICU"},"ธันวาคม 2569":{"h1":"OPD7","h2":"OPD 2"},"มกราคม 2570":{"h1":"ปู่-นิล","h2":"OPD 4"},"กุมภาพันธ์ 2570":{"h1":"Med 3","h2":"OPD 6"},"มีนาคม 2570":{"h1":"ฟ้า5","h2":"OPD 5"},"เมษายน 2570":{"h1":"ฟ้า6","h2":"OPD 8"},"พฤษภาคม 2570":{"h1":"Med หญิง","h2":"OPD 3"},"มิถุนายน 2570":{"h1":"Med ชาย","h2":"OPD 1"},"กรกฎาคม 2570":{"h1":"ICU","h2":"OPD7"},"สิงหาคม 2570":{"h1":"OPD 2","h2":"ปู่-นิล"},"กันยายน 2570":{"h1":"OPD 4","h2":"Med 3"},"ตุลาคม 2570":{"h1":"OPD 6","h2":"ฟ้า5"},"พฤศจิกายน 2570":{"h1":"OPD 5","h2":"ฟ้า6"},"ธันวาคม 2570":{"h1":"OPD 8","h2":"Med หญิง"},"มกราคม 2571":{"h1":"OPD 3","h2":"Med ชาย"},"กุมภาพันธ์ 2571":{"h1":"OPD 1","h2":"ICU"},"มีนาคม 2571":{"h1":"OPD7","h2":"OPD 2"},"เมษายน 2571":{"h1":"ปู่-นิล","h2":"OPD 4"},"พฤษภาคม 2571":{"h1":"Med 3","h2":"OPD 6"},"มิถุนายน 2571":{"h1":"ฟ้า5","h2":"OPD 5"},"กรกฎาคม 2571":{"h1":"ฟ้า6","h2":"OPD 8"},"สิงหาคม 2571":{"h1":"Med หญิง","h2":"OPD 3"},"กันยายน 2571":{"h1":"Med ชาย","h2":"OPD 1"},"ตุลาคม 2571":{"h1":"ICU","h2":"OPD7"},"พฤศจิกายน 2571":{"h1":"OPD 2","h2":"ปู่-นิล"},"ธันวาคม 2571":{"h1":"OPD 4","h2":"Med 3"}}},{"seq":14,"name":"นฤพนธ์","isNP":false,"schedule":{"กรกฎาคม 2569":{"h1":"ฟ้า5","h2":"OPD 5"},"สิงหาคม 2569":{"h1":"ฟ้า6","h2":"OPD 8"},"กันยายน 2569":{"h1":"Med หญิง","h2":"OPD 3"},"ตุลาคม 2569":{"h1":"Med ชาย","h2":"OPD 1"},"พฤศจิกายน 2569":{"h1":"ICU","h2":"OPD7"},"ธันวาคม 2569":{"h1":"OPD 2","h2":"ปู่-นิล"},"มกราคม 2570":{"h1":"OPD 4","h2":"Med 3"},"กุมภาพันธ์ 2570":{"h1":"OPD 6","h2":"ฟ้า5"},"มีนาคม 2570":{"h1":"OPD 5","h2":"ฟ้า6"},"เมษายน 2570":{"h1":"OPD 8","h2":"Med หญิง"},"พฤษภาคม 2570":{"h1":"OPD 3","h2":"Med ชาย"},"มิถุนายน 2570":{"h1":"OPD 1","h2":"ICU"},"กรกฎาคม 2570":{"h1":"OPD7","h2":"OPD 2"},"สิงหาคม 2570":{"h1":"ปู่-นิล","h2":"OPD 4"},"กันยายน 2570":{"h1":"Med 3","h2":"OPD 6"},"ตุลาคม 2570":{"h1":"ฟ้า5","h2":"OPD 5"},"พฤศจิกายน 2570":{"h1":"ฟ้า6","h2":"OPD 8"},"ธันวาคม 2570":{"h1":"Med หญิง","h2":"OPD 3"},"มกราคม 2571":{"h1":"Med ชาย","h2":"OPD 1"},"กุมภาพันธ์ 2571":{"h1":"ICU","h2":"OPD7"},"มีนาคม 2571":{"h1":"OPD 2","h2":"ปู่-นิล"},"เมษายน 2571":{"h1":"OPD 4","h2":"Med 3"},"พฤษภาคม 2571":{"h1":"OPD 6","h2":"ฟ้า5"},"มิถุนายน 2571":{"h1":"OPD 5","h2":"ฟ้า6"},"กรกฎาคม 2571":{"h1":"OPD 8","h2":"Med หญิง"},"สิงหาคม 2571":{"h1":"OPD 3","h2":"Med ชาย"},"กันยายน 2571":{"h1":"OPD 1","h2":"ICU"},"ตุลาคม 2571":{"h1":"OPD7","h2":"OPD 2"},"พฤศจิกายน 2571":{"h1":"ปู่-นิล","h2":"OPD 4"},"ธันวาคม 2571":{"h1":"Med 3","h2":"OPD 6"}}},{"seq":15,"name":"ธีราภรณ์","isNP":false,"schedule":{"กรกฎาคม 2569":{"h1":"OPD 5","h2":"ฟ้า6"},"สิงหาคม 2569":{"h1":"OPD 8","h2":"Med หญิง"},"กันยายน 2569":{"h1":"OPD 3","h2":"Med ชาย"},"ตุลาคม 2569":{"h1":"OPD 1","h2":"ICU"},"พฤศจิกายน 2569":{"h1":"OPD7","h2":"OPD 2"},"ธันวาคม 2569":{"h1":"ปู่-นิล","h2":"OPD 4"},"มกราคม 2570":{"h1":"Med 3","h2":"OPD 6"},"กุมภาพันธ์ 2570":{"h1":"ฟ้า5","h2":"OPD 5"},"มีนาคม 2570":{"h1":"ฟ้า6","h2":"OPD 8"},"เมษายน 2570":{"h1":"Med หญิง","h2":"OPD 3"},"พฤษภาคม 2570":{"h1":"Med ชาย","h2":"OPD 1"},"มิถุนายน 2570":{"h1":"ICU","h2":"OPD7"},"กรกฎาคม 2570":{"h1":"OPD 2","h2":"ปู่-นิล"},"สิงหาคม 2570":{"h1":"OPD 4","h2":"Med 3"},"กันยายน 2570":{"h1":"OPD 6","h2":"ฟ้า5"},"ตุลาคม 2570":{"h1":"OPD 5","h2":"ฟ้า6"},"พฤศจิกายน 2570":{"h1":"OPD 8","h2":"Med หญิง"},"ธันวาคม 2570":{"h1":"OPD 3","h2":"Med ชาย"},"มกราคม 2571":{"h1":"OPD 1","h2":"ICU"},"กุมภาพันธ์ 2571":{"h1":"OPD7","h2":"OPD 2"},"มีนาคม 2571":{"h1":"ปู่-นิล","h2":"OPD 4"},"เมษายน 2571":{"h1":"Med 3","h2":"OPD 6"},"พฤษภาคม 2571":{"h1":"ฟ้า5","h2":"OPD 5"},"มิถุนายน 2571":{"h1":"ฟ้า6","h2":"OPD 8"},"กรกฎาคม 2571":{"h1":"Med หญิง","h2":"OPD 3"},"สิงหาคม 2571":{"h1":"Med ชาย","h2":"OPD 1"},"กันยายน 2571":{"h1":"ICU","h2":"OPD7"},"ตุลาคม 2571":{"h1":"OPD 2","h2":"ปู่-นิล"},"พฤศจิกายน 2571":{"h1":"OPD 4","h2":"Med 3"},"ธันวาคม 2571":{"h1":"OPD 6","h2":"ฟ้า5"}}}]};
+
+const DEFAULT_CLINIC = {
+  1:{
+    1:['ธีราภรณ์','นฤพนธ์'],
+    2:['นฤพนธ์','ณัทอร','วรเดช'],
+    3:['วรเดช','ชมพูนุท','ชลิตา','นฤพนธ์'],
+    4:['ชมพูนุท','ชลิตา','นิภาพร','ณัฐพล','กองพร'],
+    5:['นิภาพร','กองพร']
+  },
+  2:{
+    1:['ชลิตา','ธีราภรณ์'],
+    2:['กิติยา','ณัฐพล','ณัทอร','วรเดช'],
+    3:['วรเดช','ชมพูนุท','กิติยา','นฤพนธ์'],
+    4:['ชมพูนุท','ชลิตา','นิภาพร','ณัฐพล'],
+    5:['นิภาพร','กองพร']
+  },
+  3:{
+    1:['ธีราภรณ์','กิติยา'],
+    2:['นฤพนธ์','ณัทอร','วรเดช'],
+    3:['วรเดช','ชมพูนุท','ชลิตา','นฤพนธ์'],
+    4:['ชมพูนุท','ชลิตา','นิภาพร','ณัฐพล','กิติยา'],
+    5:['นิภาพร','กองพร']
+  },
+  4:{
+    1:['ธีราภรณ์','ชลิตา'],
+    2:['กิติยา','ณัฐพล','ณัทอร','ปิยวดี','วรเดช'],
+    3:['วรเดช','ชมพูนุท','กิติยา','นฤพนธ์'],
+    4:['นิภาพร','ชลิตา','ณัฐพล','ชมพูนุท'],
+    5:['นิภาพร','กองพร']
+  },
+  5:{
+    1:['ธีราภรณ์','นฤพนธ์'],
+    2:['ณัทอร','วรเดช'],
+    3:['วรเดช','ชมพูนุท','ชลิตา','นฤพนธ์'],
+    4:['ชมพูนุท','ชลิตา','นิภาพร','ณัฐพล'],
+    5:['นิภาพร','กองพร']
+  }
+};
+
+// ═══════════════════════════════════════════════
+// CLINIC WEIGHT — dynamic, saved to localStorage
+// ═══════════════════════════════════════════════
+const LS_WEIGHT='opd_weight_v11';
+const LS_HIDE_WEIGHT='opd_hide_weight_v11';
+let clinicWeightMap = {}; // name → number
+let hideWeightBadge = false;
+
+const DEFAULT_WEIGHT = {
+  'ชมพูนุท': 1.0,
+  'ณัทอร':   1.0
+};
+
+function loadWeights(){
+  try{
+    const w=localStorage.getItem(LS_WEIGHT);
+    clinicWeightMap=w?JSON.parse(w):JSON.parse(JSON.stringify(DEFAULT_WEIGHT));
+  }catch{clinicWeightMap=JSON.parse(JSON.stringify(DEFAULT_WEIGHT));}
+  try{
+    const h=localStorage.getItem(LS_HIDE_WEIGHT);
+    hideWeightBadge=h?JSON.parse(h):false;
+  }catch{hideWeightBadge=false;}
+}
+function saveWeights(){
+  if(!isAdmin) return;
+  try{localStorage.setItem(LS_WEIGHT,JSON.stringify(clinicWeightMap));markSaved();}catch(e){}
+  try{localStorage.setItem(LS_HIDE_WEIGHT,JSON.stringify(hideWeightBadge));}catch(e){}
+}
+function getClinicWeight(name){ return clinicWeightMap[name]!==undefined?clinicWeightMap[name]:1.5; }
+
+function renderWeightEditor(){
+  const el=document.getElementById('weight-editor');
+  if(!el)return;
+  const toggle=document.getElementById('hide-weight-toggle');
+  if(toggle)toggle.checked=hideWeightBadge;
+  const allDocs=wardData.doctors.map(d=>d.name);
+  el.innerHTML=`
+  <table>
+    <thead><tr>
+      <th>แพทย์</th>
+      <th style="text-align:center">ตัวคูณปัจจุบัน</th>
+      <th style="text-align:center">ปรับ</th>
+      <th style="min-width:110px">แสดงผล</th>
+    </tr></thead>
+    <tbody>
+    ${allDocs.map(n=>{
+      const w=getClinicWeight(n);
+      const isCustom=clinicWeightMap[n]!==undefined;
+      const barW=Math.round(w/1.5*100);
+      return `<tr>
+        <td><b>${n}</b></td>
+        <td style="text-align:center">
+          <span style="font-size:1.1rem;font-weight:700;color:${w<1.5?'var(--pu)':w>1.5?'var(--ac2)':'var(--ac)'}">${w}</span>
+          ${isCustom?'<span style="font-size:.65rem;color:var(--pu);margin-left:4px">custom</span>':''}
+        </td>
+        <td style="text-align:center">
+          <div style="display:flex;gap:4px;align-items:center;justify-content:center">
+            <button class="btn btn-ghost btn-sm" style="padding:.18rem .45rem" onclick="adjustWeight('${n}',-0.5)" ${w<=0?'disabled':''}>−0.5</button>
+            <button class="btn btn-ghost btn-sm" style="padding:.18rem .45rem" onclick="adjustWeight('${n}',-0.25)" ${w<=0?'disabled':''}>−¼</button>
+            <button class="btn btn-ghost btn-sm" style="padding:.18rem .45rem" onclick="adjustWeight('${n}',0.25)">+¼</button>
+            <button class="btn btn-ghost btn-sm" style="padding:.18rem .45rem" onclick="adjustWeight('${n}',0.5)">+0.5</button>
+            ${isCustom?`<button class="btn btn-danger btn-sm" style="padding:.18rem .45rem" onclick="resetWeight('${n}')"><i class="fas fa-undo"></i></button>`:''}
+          </div>
+        </td>
+        <td>
+          <div class="prog" style="height:6px">
+            <div style="width:${barW}%;background:${w<1.5?'var(--pu)':w>1.5?'var(--ac2)':'var(--ac)'};height:100%;border-radius:3px"></div>
+          </div>
+          <div style="font-size:.67rem;color:var(--mu);margin-top:2px">${w===0?'ไม่นับ':w<1.5?'ลดภาระ':w===1.5?'มาตรฐาน':'เพิ่มภาระ'}</div>
+        </td>
+      </tr>`;
+    }).join('')}
+    </tbody>
+  </table>`;
+}
+function adjustWeight(name, delta){
+  const cur=getClinicWeight(name);
+  const newW=Math.max(0, Math.round((cur+delta)*100)/100);
+  clinicWeightMap[name]=newW;
+  saveWeights();renderWeightEditor();
+  toast(`${name}: ×${newW} ✓`);
+}
+function resetWeight(name){
+  delete clinicWeightMap[name];
+  saveWeights();renderWeightEditor();
+  toast(`${name}: รีเซ็ตเป็น ×1.5`);
+}
+function resetAllWeights(){
+  if(!confirm('รีเซ็ตตัวคูณทั้งหมดเป็น 1.5?'))return;
+  clinicWeightMap={};
+  saveWeights();renderWeightEditor();
+  toast('รีเซ็ตทั้งหมดสำเร็จ');
+}
+function toggleHideWeight(val){
+  hideWeightBadge=val;
+  saveWeights();
+  toast(val?'ซ่อน badge ตัวคูณแล้ว':'แสดง badge ตัวคูณแล้ว');
+}
+
+// ═══════════════════════════════════════════════
+// STATE — load from localStorage or use defaults
+// ═══════════════════════════════════════════════
+let wardData, clinicSchedule, holidays, lastOPDSched=[];
+
+function loadState(){
+  try{
+    const w=localStorage.getItem(LS_WARD);
+    wardData=w?JSON.parse(w):JSON.parse(JSON.stringify(DEFAULT_WARD));
+  }catch{wardData=JSON.parse(JSON.stringify(DEFAULT_WARD));}
+  try{
+    const c=localStorage.getItem(LS_CLINIC);
+    clinicSchedule=c?JSON.parse(c):JSON.parse(JSON.stringify(DEFAULT_CLINIC));
+    // ensure all weeks/days exist
+    for(let w=1;w<=5;w++){if(!clinicSchedule[w])clinicSchedule[w]={};for(let d=1;d<=5;d++){if(!clinicSchedule[w][d])clinicSchedule[w][d]=[];}}
+  }catch{clinicSchedule=JSON.parse(JSON.stringify(DEFAULT_CLINIC));}
+  try{
+    const h=localStorage.getItem(LS_HOL);
+    holidays=h?JSON.parse(h):{};
+  }catch{holidays={};}
+}
+
+function saveWard(){
+  if(!isAdmin){ toast('ไม่มีสิทธิ์แก้ไข — กรุณา login ด้วยรหัส Admin','error'); return; }
+  try{localStorage.setItem(LS_WARD,JSON.stringify(wardData));markSaved();}catch(e){toast('บันทึกไม่ได้: '+e.message,'err');}
+}
+function saveClinic(){
+  if(!isAdmin){ toast('ไม่มีสิทธิ์แก้ไข — กรุณา login ด้วยรหัส Admin','error'); return; }
+  try{localStorage.setItem(LS_CLINIC,JSON.stringify(clinicSchedule));markSaved();}catch(e){toast('บันทึกไม่ได้: '+e.message,'err');}
+}
+function saveHol(){
+  if(!isAdmin){ toast('ไม่มีสิทธิ์แก้ไข — กรุณา login ด้วยรหัส Admin','error'); return; }
+  try{localStorage.setItem(LS_HOL,JSON.stringify(holidays));markSaved();}catch(e){}
+}
+
+let saveTimer;
+let _fbPushTimer;
+function markSaved(){
+  if(!isAdmin) return; // Staff ไม่ save
+  clearTimeout(saveTimer);
+  const el=document.getElementById('save-ind');
+  const txt=document.getElementById('save-txt');
+  el.className='save-indicator saving';txt.textContent='กำลังบันทึก...';
+  saveTimer=setTimeout(()=>{
+    el.className='save-indicator';
+    txt.textContent='บันทึกแล้ว ✓';
+  },600);
+  // auto-push to Firebase (debounce 1.5s) — Admin only
+  clearTimeout(_fbPushTimer);
+  _fbPushTimer = setTimeout(()=>{
+    if(typeof fbPush === 'function') fbPush();
+  }, 1500);
+}
+
+function resetToDefault(){
+  if(!confirm('รีเซ็ตข้อมูลทั้งหมดกลับเป็นค่าเริ่มต้น?'))return;
+  localStorage.removeItem(LS_WARD);localStorage.removeItem(LS_CLINIC);localStorage.removeItem(LS_HOL);
+  loadState();renderAll();toast('รีเซ็ตสำเร็จ');
+}
+
+function renderAll(){
+  renderWardTable();renderDocEdit();renderClinicEditor();renderHols();renderWeightEditor();
+}
+
+// ═══════════════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════════════
+loadState();
+loadWeights();
+const nowD=new Date();
+renderAll();
+
+// ═══════════════════════════════════════════════
+// TABS
+// ═══════════════════════════════════════════════
+function goTab(id,btn){
+  document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
+  document.getElementById('tab-'+id).classList.add('active');
+  btn.classList.add('active');
+}
+
+// ═══════════════════════════════════════════════
+// WARD TABLE
+// ═══════════════════════════════════════════════
+function wc(v){
+  if(!v||!v.trim())return`<span style="color:var(--mu)">—</span>`;
+  v=v.trim();
+  let c='wc-other';
+  if(/^OPD/i.test(v))c='wc-opd';
+  else if(/ICU/i.test(v))c='wc-icu';
+  else if(/stroke|NM/i.test(v))c='wc-stroke';
+  else if(/Med|หญิง|ชาย/i.test(v))c='wc-med';
+  else if(/ฟ้า|ปู่|นิล/i.test(v))c='wc-ward';
+  return`<span class="wc ${c}">${v}</span>`;
+}
+function renderWardTable(){
+  const M=wardData.monthColumns;
+  const years=[...new Set(M.map(k=>k.split(' ').pop()))];
+  const byYear={};years.forEach(y=>{byYear[y]=M.filter(k=>k.endsWith(' '+y));});
+  const MS=['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
+
+  let h=`<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:.9rem;align-items:center">
+    <span style="font-size:.73rem;color:var(--mu);margin-right:2px">ปี:</span>
+    ${years.map((y,i)=>`<button class="btn btn-sm" id="wyr-${y}" onclick="filterWardYear('${y}')"
+      style="min-width:56px;background:${i===0?'var(--ac)':'var(--s3)'};color:${i===0?'#fff':'var(--tx)'};border:1px solid ${i===0?'var(--ac)':'var(--bd2)'}">${y}</button>`).join('')}
+  </div>`;
+
+  years.forEach((y,yi)=>{
+    const cols=byYear[y];
+    /* sticky width: seq=28px, name=140px */
+    h+=`<div class="ward-yr-sec" id="wsec-${y}" style="display:${yi===0?'block':'none'}">
+    <div style="overflow-x:auto">
+    <table style="border-collapse:collapse;font-size:.78rem">
+      <thead>
+        <tr>
+          <th style="min-width:28px;position:sticky;left:0;z-index:4;background:var(--s3);box-shadow:1px 0 0 var(--bd2)">#</th>
+          <th style="min-width:140px;position:sticky;left:28px;z-index:4;background:var(--s3);box-shadow:2px 0 0 var(--ac);padding-right:.5rem">แพทย์</th>
+          ${cols.map(k=>{const mi=MONTHS_TH.indexOf(k.split(' ')[0]);
+            return`<th colspan="2" style="text-align:center;min-width:138px"><span class="mhdr">${MS[mi]||k} ${y}</span></th>`;}).join('')}
+        </tr>
+        <tr>
+          <th style="position:sticky;left:0;z-index:4;background:var(--s3);box-shadow:1px 0 0 var(--bd2)"></th>
+          <th style="position:sticky;left:28px;z-index:4;background:var(--s3);box-shadow:2px 0 0 var(--ac)"></th>
+          ${cols.map(()=>`<th style="text-align:center"><span class="half-tag">1–15</span></th><th style="text-align:center"><span class="half-tag">16–31</span></th>`).join('')}
+        </tr>
+      </thead>
+      <tbody>
+        ${wardData.doctors.map(d=>{
+          const rowBg=d.isNP?'#1a1230':'var(--sf)';
+          const stickyBg=d.isNP?'#1a1230':'var(--sf)';
+          return`<tr>
+            <td style="color:var(--mu);font-size:.7rem;position:sticky;left:0;background:${stickyBg};z-index:2;box-shadow:1px 0 0 var(--bd2)">${d.seq}</td>
+            <td style="position:sticky;left:28px;background:${stickyBg};z-index:2;box-shadow:2px 0 0 var(--ac);font-weight:600;padding-right:.5rem">${d.name}${d.isNP?`<span class="nbadge" style="margin-left:4px">Neuro</span>`:''}</td>
+            ${cols.map(k=>{const s=(d.schedule&&d.schedule[k])||{h1:'',h2:''};
+              return`<td style="text-align:center">${wc(s.h1)}</td><td style="text-align:center">${wc(s.h2)}</td>`;}).join('')}
+          </tr>`;}).join('')}
+      </tbody>
+    </table></div></div>`;
+  });
+  document.getElementById('ward-tbl').innerHTML=h;
+}
+function filterWardYear(y){
+  document.querySelectorAll('.ward-yr-sec').forEach(el=>el.style.display='none');
+  const sec=document.getElementById('wsec-'+y);if(sec)sec.style.display='block';
+  document.querySelectorAll('[id^="wyr-"]').forEach(b=>{
+    const on=b.id==='wyr-'+y;
+    b.style.background=on?'var(--ac)':'var(--s3)';
+    b.style.color=on?'#fff':'var(--tx)';
+    b.style.borderColor=on?'var(--ac)':'var(--bd2)';
+  });
+}
+
+// ═══════════════════════════════════════════════
+// DOCTOR NAME EDITOR
+// ═══════════════════════════════════════════════
+function renderDocEdit(){
+  document.getElementById('doc-edit-list').innerHTML=wardData.doctors.map((d,i)=>`
+    <div class="doc-row">
+      <span class="doc-seq">${d.seq}</span>
+      <input class="doc-inp" type="text" id="di-${i}" value="${d.name}">
+      ${d.isNP?`<span class="nbadge">Neuro คู่</span>`:''}
+    </div>`).join('');
+}
+
+function saveDoctorNames(){
+  wardData.doctors.forEach((d,i)=>{
+    const inp=document.getElementById(`di-${i}`);
+    if(!inp)return;
+    const newName=inp.value.trim();
+    if(newName&&newName!==d.name){
+      // update clinic schedule
+      for(let w=1;w<=5;w++)for(let dow=1;dow<=5;dow++){
+        const arr=clinicSchedule[w]&&clinicSchedule[w][dow];
+        if(!arr)continue;
+        const idx=arr.indexOf(d.name);
+        if(idx>-1)arr[idx]=newName;
+      }
+      d.name=newName;
+    }
+  });
+  saveWard();saveClinic();
+  renderWardTable();renderDocEdit();renderClinicEditor();
+  toast('บันทึกชื่อสำเร็จ ✓');
+}
+
+// ═══════════════════════════════════════════════
+// CLINIC EDITOR
+// ═══════════════════════════════════════════════
+function renderClinicEditor(){
+  const allDocs=wardData.doctors.map(d=>d.name);
+  let h='';
+  for(let w=1;w<=5;w++){
+    h+=`<div class="week-block">
+      <div class="week-hdr"><i class="fas fa-calendar-week"></i> สัปดาห์ที่ ${w}</div>
+      <div class="g5">`;
+    for(let dow=1;dow<=5;dow++){
+      const docs=(clinicSchedule[w]&&clinicSchedule[w][dow])||[];
+      const tags=docs.map((n,di)=>`<span class="ctag">${n}<span class="ctag-x" onclick="removeClinic(${w},${dow},${di})">✕</span></span>`).join('');
+      const opts=allDocs.map(n=>`<option value="${n}">${n}</option>`).join('');
+      h+=`<div class="day-col">
+        <div class="day-lbl">${DAYS_F[dow]}</div>
+        <div class="ctags" id="ct-${w}-${dow}">${tags||`<span style="font-size:.7rem;color:var(--mu)">ไม่มี</span>`}</div>
+        <div class="cadd-row">
+          <select class="cadd-sel" id="cs-${w}-${dow}">${opts}</select>
+          <button class="btn btn-warn cadd-btn" onclick="addClinic(${w},${dow})"><i class="fas fa-plus"></i></button>
+        </div>
+      </div>`;
+    }
+    h+=`</div></div>`;
+  }
+  document.getElementById('clinic-editor').innerHTML=h;
+}
+
+function addClinic(w,dow){
+  const sel=document.getElementById(`cs-${w}-${dow}`);
+  const name=sel?sel.value:'';
+  if(!name)return;
+  if(!clinicSchedule[w])clinicSchedule[w]={};
+  if(!clinicSchedule[w][dow])clinicSchedule[w][dow]=[];
+  if(clinicSchedule[w][dow].includes(name)){toast('มีรายชื่อนี้แล้ว');return;}
+  clinicSchedule[w][dow].push(name);
+  saveClinic();
+  renderClinicEditor();
+  toast(`เพิ่ม ${name} สำเร็จ ✓`);
+}
+
+function removeClinic(w,dow,idx){
+  clinicSchedule[w][dow].splice(idx,1);
+  saveClinic();
+  renderClinicEditor();
+}
+
+// ═══════════════════════════════════════════════
+// CLINIC LOOKUP
+// ═══════════════════════════════════════════════
+function getClinicDocs(dateStr){
+  const d=new Date(dateStr);
+  const dow=d.getDay();
+  if(dow===0||dow===6)return[];
+  const day=d.getDate();
+  const firstDow=new Date(d.getFullYear(),d.getMonth(),1).getDay()||7;
+  const weekNum=Math.min(Math.ceil((day+(firstDow-1))/7),5);
+  return(clinicSchedule[weekNum]&&clinicSchedule[weekNum][dow])||[];
+}
+
+// ═══════════════════════════════════════════════
+// OPD POOL
+// ═══════════════════════════════════════════════
+function getSchedKey(mIdx,yearBE){return MONTHS_TH[mIdx]+' '+yearBE;}
+function getOPDPool(mIdx,yearBE){
+  const key=getSchedKey(mIdx,yearBE||parseInt(document.getElementById('opd-year').value));
+  const h1=[],h2=[];
+  wardData.doctors.forEach(d=>{
+    const s=d.schedule&&d.schedule[key];
+    if(!s)return;
+    if(s.h1&&/^OPD/i.test(s.h1.trim()))h1.push(d.name);
+    if(s.h2&&/^OPD/i.test(s.h2.trim()))h2.push(d.name);
+  });
+  return{h1,h2};
+}
+
+// helper: ยังต้องใช้ใน checkRules ของ renderSummary
+function hasAnyClinic(name){
+  for(let w=1;w<=5;w++) for(let d=1;d<=5;d++)
+    if((clinicSchedule[w]&&clinicSchedule[w][d]||[]).includes(name)) return true;
+  return false;
+}
+
+// ═══════════════════════════════════════════════
+// CORE SCHEDULER v7
+//
+// หลักการ: Unified priority — ทุกคนแข่งใน queue เดียวกัน
+//   คนไม่มีคลินิก: rank ด้วย OPD count ปัจจุบัน
+//   คนมีคลินิก:    rank ด้วย projected_opd = OPD + clinicEq_remaining
+//                  → สะท้อนภาระรวมเมื่อสิ้น half
+//
+//   Gap rule: เมื่อ assign แต่ละวัน ถ้า noClinic ทุกคน OPD ≥ (max_opd_clinic_now + 2)
+//             → ให้ clinic ออกก่อนจนกว่า gap จะกลับมา < 2
+//             ผลคือ gap สุดท้ายอยู่ที่ 2-3 วัน อัตโนมัติ
+// ═══════════════════════════════════════════════
+function buildSchedule(mIdx, yearBE, perDay, jitterSeed){
+  const yearCE = yearBE - 543;
+  const pool   = getOPDPool(mIdx, yearBE);
+  const days   = new Date(yearCE, mIdx+1, 0).getDate();
+  const sched  = [];
+
+  const rng = (()=>{
+    let s = (jitterSeed||1) * 2654435761;
+    return () => { s ^= s<<13; s ^= s>>17; s ^= s<<5; return (s>>>0)/4294967296; };
+  })();
+
+  const opdCount = { h1:{}, h2:{} };
+  const loadEq   = { h1:{}, h2:{} };
+
+  // clinicFlag per half: TRUE ถ้ามีคลินิกอย่างน้อย 1 วันใน half นั้น
+  function hasClinicInHalf(name, half){
+    for(let day=(half==='h1'?1:16); day<=(half==='h1'?15:days); day++){
+      const dt2=new Date(yearCE,mIdx,day);
+      if(dt2.getDay()===0||dt2.getDay()===6) continue;
+      const ds2=`${yearCE}-${String(mIdx+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+      if(getClinicDocs(ds2).includes(name)) return true;
+    }
+    return false;
+  }
+
+  const clinicFlag = { h1:{}, h2:{} };
+  ['h1','h2'].forEach(h => {
+    [...new Set([...pool.h1,...pool.h2])].forEach(n => {
+      clinicFlag[h][n] = hasClinicInHalf(n, h);
+    });
+  });
+
+  ['h1','h2'].forEach(h => {
+    pool[h].forEach(n => { opdCount[h][n]=0; loadEq[h][n]=0; });
+  });
+
+  // นับวันทำงานทั้งหมดต่อ half
+  const workDays = { h1:0, h2:0 };
+  for(let day=1; day<=days; day++){
+    const dt=new Date(yearCE,mIdx,day);
+    if(dt.getDay()===0||dt.getDay()===6) continue;
+    const ds=`${yearCE}-${String(mIdx+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+    if(!holidays[ds]) workDays[day<=15?'h1':'h2']++;
+  }
+
+  // pre-compute clinic ที่เหลือต่อคนต่อ half (ลดลงทุกวัน → ใช้ประมาณ projected total)
+  const clinicRemain = { h1:{}, h2:{} };
+  ['h1','h2'].forEach(h=>{
+    [...new Set([...pool.h1,...pool.h2])].forEach(n=>{ clinicRemain[h][n]=0; });
+  });
+  for(let day=1; day<=days; day++){
+    const dt=new Date(yearCE,mIdx,day);
+    if(dt.getDay()===0||dt.getDay()===6) continue;
+    const ds=`${yearCE}-${String(mIdx+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+    if(holidays[ds]) continue;
+    const h=day<=15?'h1':'h2';
+    getClinicDocs(ds).forEach(n=>{
+      if(!(n in clinicRemain[h])) clinicRemain[h][n]=0;
+      clinicRemain[h][n] += getClinicWeight(n);
+    });
+  }
+
+  for(let day=1; day<=days; day++){
+    const dt  = new Date(yearCE, mIdx, day);
+    const dow = dt.getDay();
+    if(dow===0||dow===6) continue;
+
+    const ds    = `${yearCE}-${String(mIdx+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+    const isHol = !!holidays[ds];
+    const half  = day<=15 ? 'h1' : 'h2';
+    const ph    = pool[half];
+
+    // บวก loadEq คลินิกวันนี้ก่อน แล้วหัก clinicRemain
+    const clinicDocs = isHol ? [] : getClinicDocs(ds);
+    if(!isHol){
+      clinicDocs.forEach(n => {
+        if(!(n in loadEq[half])) loadEq[half][n]=0;
+        loadEq[half][n] += getClinicWeight(n);
+        // หัก clinicRemain สำหรับวันนี้ออก (วันนี้ผ่านไปแล้ว)
+        clinicRemain[half][n] = Math.max(0, (clinicRemain[half][n]||0) - getClinicWeight(n));
+      });
+    }
+
+    const assigned = [];
+    if(!isHol && ph.length > 0){
+      const eligible = ph.filter(n => !clinicDocs.includes(n));
+
+      const grpNo  = eligible.filter(n => !clinicFlag[half][n]);
+      const grpYes = eligible.filter(n =>  clinicFlag[half][n]);
+
+      // projected total ของคนมีคลินิก = OPD ปัจจุบัน + loadEq(clinic ที่สะสม) + clinic ที่เหลือ
+      // แต่เราใช้ projected_opd = OPD ปัจจุบัน + clinicRemain (เพื่อประมาณว่าจะได้ OPD กี่วัน)
+      // ยิ่ง clinicRemain มาก → projected OPD สุดท้ายน้อย → urgent ออก OPD มากขึ้น
+
+      // ── Gap rule (dynamic) ──
+      // maxOpdNo = OPD สูงสุดของกลุ่มไม่มีคลินิกใน pool
+      // maxOpdYes = OPD สูงสุดของกลุ่มมีคลินิกใน pool
+      // ถ้า maxOpdNo - maxOpdYes < 2 → ยังต้องดัน noClinic ก่อน
+      // ถ้า maxOpdNo - maxOpdYes >= 3 → ห้ามดัน noClinic แล้ว → ให้ clinic ออก
+      const allNoInPool  = ph.filter(n => !clinicFlag[half][n]);
+      const allYesInPool = ph.filter(n =>  clinicFlag[half][n]);
+
+      const maxOpdNo  = allNoInPool.length  ? Math.max(...allNoInPool.map(n=>opdCount[half][n]||0))  : 0;
+      const maxOpdYes = allYesInPool.length ? Math.max(...allYesInPool.map(n=>opdCount[half][n]||0)) : 0;
+      const gap = maxOpdNo - maxOpdYes;
+
+      // ── เรียงลำดับ eligible ──
+      const sorted = [...eligible].sort((a, b) => {
+        const aHasC = clinicFlag[half][a];
+        const bHasC = clinicFlag[half][b];
+        const aOpd  = opdCount[half][a]||0;
+        const bOpd  = opdCount[half][b]||0;
+        const aLoad = loadEq[half][a]||0;
+        const bLoad = loadEq[half][b]||0;
+        const aRemClin = clinicRemain[half][a]||0;
+        const bRemClin = clinicRemain[half][b]||0;
+
+        // projected total ของคนมีคลินิก (เทียบกับ noClinic)
+        // ใช้ aLoad (clinic ที่ได้แล้ว) + aRemClin (clinic ที่เหลือ) + aOpd
+        const aProjected = aHasC ? (aOpd + aLoad - aOpd + aRemClin + aOpd) : aOpd;
+        // simplify: projected = aOpd + aLoad_clinic_only + aRemClin
+        // aLoad รวม OPD ด้วยแล้ว ดังนั้น clinic_load = aLoad - aOpd
+        const aClinicSoFar = aLoad - aOpd;
+        const bClinicSoFar = bLoad - bOpd;
+        const aProj = aHasC ? (aOpd + aClinicSoFar + aRemClin) : aOpd;
+        const bProj = bHasC ? (bOpd + bClinicSoFar + bRemClin) : bOpd;
+
+        // ── กฎ gap: ถ้า gap >= 3 → clinic urgent (ให้ clinic ออกก่อน) ──
+        if(gap >= 3){
+          // clinic ก่อน noClinic
+          if(aHasC && !bHasC) return -1;
+          if(!aHasC && bHasC)  return  1;
+          // ทั้งคู่มีคลินิก: projected น้อยสุดก่อน
+          if(aHasC && bHasC){
+            const d = aProj - bProj;
+            return d !== 0 ? d : rng()-0.5;
+          }
+          // ทั้งคู่ไม่มีคลินิก: OPD น้อยสุดก่อน
+          const d = aOpd - bOpd;
+          return d !== 0 ? d : rng()-0.5;
+        }
+
+        // ── กฎปกติ: gap < 3 → noClinic ออกก่อน แต่ clinic ก็ต้องออกด้วย ──
+        // ถ้า gap < 2 → noClinic urgent
+        // ถ้า gap = 2 → สมดุล → ทุกคนแข่งด้วย projected
+        if(gap < 2){
+          if(!aHasC && bHasC) return -1;
+          if(aHasC && !bHasC)  return  1;
+        }
+
+        // ทั้งคู่มีคลินิก: projected น้อยสุดก่อน
+        if(aHasC && bHasC){
+          const d = aProj - bProj;
+          return d !== 0 ? d : rng()-0.5;
+        }
+
+        // ทั้งคู่ไม่มีคลินิก: OPD น้อยสุดก่อน
+        if(!aHasC && !bHasC){
+          const d = aOpd - bOpd;
+          return d !== 0 ? d : rng()-0.5;
+        }
+
+        // gap = 2: แข่งด้วย projected (รวมทั้ง 2 กลุ่ม)
+        const d = aProj - bProj;
+        return d !== 0 ? d : rng()-0.5;
+      });
+
+      sorted.slice(0, perDay).forEach(n => {
+        assigned.push(n);
+        opdCount[half][n] = (opdCount[half][n]||0) + 1;
+        loadEq[half][n]   = (loadEq[half][n]||0) + 1;
+      });
+    }
+
+    sched.push({ date:ds, dow, isHol, holName:holidays[ds]||'', half, assigned, clinicDocs });
+  }
+
+  return sched;
+}
+
+// ═══════════════════════════════════════════════
+// GENERATE OPD
+// ═══════════════════════════════════════════════
+function genOPD(){
+  const mIdx   = parseInt(document.getElementById('opd-month').value);
+  const yearBE = parseInt(document.getElementById('opd-year').value);
+  const perDay = parseInt(document.getElementById('opd-per-day').value)||4;
+
+  const sched = buildSchedule(mIdx, yearBE, perDay, 1);
+  lastOPDSched = sched;
+  document.getElementById('opd-label').textContent = `— ${MONTHS_TH[mIdx]} ${yearBE}`;
+  renderOPDTable(sched, perDay);
+  renderSummary(sched, mIdx, yearBE, perDay);
+  toast('สร้างตาราง OPD สำเร็จ ✓');
+}
+
+// ═══════════════════════════════════════════════
+// RESHUFFLE — จัดใหม่ด้วย seed ต่างกัน
+// ═══════════════════════════════════════════════
+let _reshuffleSeed = 2;
+function reshuffleOPD(){
+  if(!lastOPDSched.length){ toast('กด "สร้างตาราง OPD" ก่อน'); return; }
+  const mIdx  = parseInt(document.getElementById('opd-month').value);
+  const yearBE= parseInt(document.getElementById('opd-year').value);
+  const perDay= parseInt(document.getElementById('opd-per-day').value)||4;
+
+  _reshuffleSeed = (_reshuffleSeed * 6364136223846793005 + 1442695040888963407) >>> 0 || 2;
+  const sched = buildSchedule(mIdx, yearBE, perDay, _reshuffleSeed);
+  lastOPDSched = sched;
+  renderOPDTable(sched, perDay);
+  renderSummary(sched, mIdx, yearBE, perDay);
+  toast('จัดใหม่สำเร็จ ✓ (ภาระสมดุล)');
+}
+
+// ═══════════════════════════════════════════════
+// RENDER OPD TABLE
+// ═══════════════════════════════════════════════
+function renderOPDTable(sched,perDay){
+  const allDocNames = [...new Set(wardData.doctors.map(d=>d.name)), 'ธมนวรรณ'];
+
+  let h=`
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:.7rem;flex-wrap:wrap">
+    <span style="font-size:.78rem;color:var(--mu)">
+      <i class="fas fa-edit" style="color:var(--ac)"></i>
+      <b style="color:var(--tx)">Mode แก้ไขด้วยตนเอง:</b>
+      กดที่ช่องแพทย์เพื่อแก้ไข — ระบบจะคำนวณภาระงานใหม่อัตโนมัติ
+    </span>
+    <span class="admin-only" style="margin-left:auto">
+      <button class="btn btn-ghost btn-sm" onclick="addOPDRow()" style="font-size:.72rem">
+        <i class="fas fa-plus"></i> เพิ่มแถว
+      </button>
+    </span>
+  </div>
+  <div class="tbl-wrap"><table><thead><tr>
+    <th>วันที่</th><th>วัน</th><th>ครึ่ง</th>
+    ${Array.from({length:perDay},(_,i)=>`<th>แพทย์ ${i+1}</th>`).join('')}
+    <th style="min-width:60px"></th>
+    <th>คลินิกพิเศษ</th>
+  </tr></thead><tbody>`;
+
+  let prevH='';
+  sched.forEach((r,ri)=>{
+    const[y,m,d]=r.date.split('-').map(Number);
+    const disp=`${d}/${m}/${y+543}`;
+    const hl=r.half==='h1'?'<span class="half-tag">1–15</span>':'<span class="half-tag">16–31</span>';
+    const tb=r.half!==prevH&&prevH!==''?'border-top:2px solid rgba(46,164,255,.15)':'';
+    prevH=r.half;
+
+    if(r.isHol){
+      h+=`<tr class="holiday-row">
+        <td style="${tb}"><b>${disp}</b></td><td style="${tb}">${DAYS_S[r.dow]}</td><td style="${tb}">${hl}</td>
+        <td colspan="${perDay+2}" style="${tb};text-align:center;color:var(--ac2)"><i class="fas fa-calendar-times"></i> ${r.holName}</td>
+      </tr>`;
+    } else {
+      // slots แพทย์ — editable
+      const slotCells = Array.from({length:perDay},(_,i)=>{
+        const name = r.assigned[i]||'';
+        const display = name
+          ? `<span class="opd-slot" style="cursor:pointer" title="คลิกเพื่อแก้ไข">${name}</span>`
+          : `<span style="color:var(--mu);cursor:pointer;font-size:.8rem" title="คลิกเพื่อเพิ่ม">+ เพิ่ม</span>`;
+        return `<td style="${tb}" class="admin-only-cell" onclick="editOPDCell(this,${ri},${i})"
+          data-row="${ri}" data-slot="${i}">${display}</td>`;
+      }).join('');
+
+      const cHtml=r.clinicDocs.length
+        ?r.clinicDocs.map(n=>`<span class="clinic-slot">★ ${n}</span>`).join('')
+        :`<span style="color:var(--mu)">—</span>`;
+
+      h+=`<tr id="opd-row-${ri}">
+        <td style="${tb}"><b>${disp}</b></td>
+        <td style="${tb}">${DAYS_S[r.dow]}</td>
+        <td style="${tb}">${hl}</td>
+        ${slotCells}
+        <td style="${tb};text-align:center" class="admin-only">
+          <button onclick="addOPDSlot(${ri})" title="เพิ่มแพทย์" style="background:none;border:none;color:var(--gn);cursor:pointer;font-size:.85rem"><i class="fas fa-user-plus"></i></button>
+        </td>
+        <td style="${tb}">${cHtml}</td>
+      </tr>`;
+    }
+  });
+
+  document.getElementById('opd-wrap').innerHTML=h+`</tbody></table></div>`;
+
+  // apply admin-only visibility to cells
+  applyAdminCells();
+}
+
+function applyAdminCells(){
+  const cells = document.querySelectorAll('.admin-only-cell');
+  cells.forEach(c => {
+    if(!isAdmin){
+      c.style.cursor='default';
+      c.onclick=null;
+    }
+  });
+}
+
+// ── แก้ไขชื่อแพทย์ใน cell ──
+function editOPDCell(td, rowIdx, slotIdx){
+  if(!isAdmin) return;
+  const r = lastOPDSched[rowIdx];
+  if(!r || r.isHol) return;
+
+  const current = r.assigned[slotIdx]||'';
+  const allNames = [...new Set([...wardData.doctors.map(d=>d.name), 'ธมนวรรณ', ''])];
+
+  // สร้าง dropdown + input
+  td.innerHTML = `
+    <div style="display:flex;gap:4px;align-items:center;min-width:120px">
+      <select id="edit-sel-${rowIdx}-${slotIdx}" style="
+        background:var(--s3);border:1px solid var(--ac);border-radius:5px;
+        color:var(--tx);font-family:'Sarabun',sans-serif;font-size:.78rem;
+        padding:2px 4px;flex:1;max-width:120px
+      " onchange="commitOPDEdit(${rowIdx},${slotIdx},this.value)">
+        <option value="">— ว่าง —</option>
+        ${allNames.filter(n=>n).map(n=>`<option value="${n}" ${n===current?'selected':''}>${n}</option>`).join('')}
+        <option value="__custom__">✏️ พิมพ์เอง...</option>
+      </select>
+      <button onclick="commitOPDEdit(${rowIdx},${slotIdx},document.getElementById('edit-sel-${rowIdx}-${slotIdx}').value)"
+        style="background:var(--gn);border:none;border-radius:4px;color:#fff;padding:2px 7px;cursor:pointer;font-size:.78rem">✓</button>
+      <button onclick="cancelOPDEdit(${rowIdx},${slotIdx})"
+        style="background:var(--s3);border:1px solid var(--bd2);border-radius:4px;color:var(--mu);padding:2px 7px;cursor:pointer;font-size:.78rem">✕</button>
+    </div>`;
+
+  const sel = td.querySelector('select');
+  sel.focus();
+  sel.addEventListener('change', function(){
+    if(this.value==='__custom__'){
+      const custom = prompt('พิมพ์ชื่อแพทย์:','');
+      if(custom !== null) commitOPDEdit(rowIdx, slotIdx, custom.trim());
+      else cancelOPDEdit(rowIdx, slotIdx);
+    }
+  });
+}
+
+function commitOPDEdit(rowIdx, slotIdx, newName){
+  if(newName==='__custom__') return;
+  const r = lastOPDSched[rowIdx];
+  if(!r) return;
+
+  // อัปเดต assigned array
+  while(r.assigned.length <= slotIdx) r.assigned.push('');
+  r.assigned[slotIdx] = newName.trim();
+
+  // ลบ empty slot ท้าย
+  while(r.assigned.length && !r.assigned[r.assigned.length-1]) r.assigned.pop();
+
+  const perDay = parseInt(document.getElementById('opd-per-day').value)||4;
+  renderOPDTable(lastOPDSched, perDay);
+
+  // คำนวณสรุปใหม่
+  const mIdx  = parseInt(document.getElementById('opd-month').value);
+  const yearBE= parseInt(document.getElementById('opd-year').value);
+  renderSummary(lastOPDSched, mIdx, yearBE, perDay);
+
+  toast('แก้ไขแล้ว — ภาระงานอัปเดตใหม่ ✓');
+}
+
+function cancelOPDEdit(rowIdx, slotIdx){
+  const perDay = parseInt(document.getElementById('opd-per-day').value)||4;
+  renderOPDTable(lastOPDSched, perDay);
+}
+
+function addOPDSlot(rowIdx){
+  if(!isAdmin) return;
+  const r = lastOPDSched[rowIdx];
+  if(!r || r.isHol) return;
+  r.assigned.push('');
+  const perDay = Math.max(parseInt(document.getElementById('opd-per-day').value)||4, r.assigned.length);
+  renderOPDTable(lastOPDSched, perDay);
+  // เปิด edit cell ตัวใหม่ทันที
+  const newSlot = r.assigned.length - 1;
+  const td = document.querySelector(`[data-row="${rowIdx}"][data-slot="${newSlot}"]`);
+  if(td) editOPDCell(td, rowIdx, newSlot);
+}
+
+// ═══════════════════════════════════════════════
+// SUMMARY
+// ═══════════════════════════════════════════════
+function renderSummary(sched,mIdx,yearBE,perDay){
+  const mName = MONTHS_TH[mIdx];
+  const pool  = getOPDPool(mIdx,yearBE);
+  // OPD pool sets per half (for THIS month)
+  const poolH1Set = new Set(pool.h1);
+  const poolH2Set = new Set(pool.h2);
+  // "วน OPD" = อยู่ใน pool อย่างน้อยหนึ่งครึ่ง
+  const poolAllSet = new Set([...pool.h1, ...pool.h2]);
+
+  const h1rows  = sched.filter(r=>!r.isHol && r.half==='h1');
+  const h2rows  = sched.filter(r=>!r.isHol && r.half==='h2');
+  const allWork = sched.filter(r=>!r.isHol);
+
+  // ── ตรวจกฎ: OPD(noClinic) > OPD(clinic) + 2 และ ≤ OPD(clinic_max) + 3 ──
+  function checkRules(rows, halfLabel){
+    if(!rows.length) return [];
+    const opdC = {}, clinC = {};
+    rows.forEach(r => {
+      r.assigned.forEach(n => { opdC[n]=(opdC[n]||0)+1; });
+      r.clinicDocs.forEach(n => { clinC[n]=(clinC[n]||0)+1; });
+    });
+    const phNames = [...new Set(rows.flatMap(r=>r.assigned))];
+    const namesWithClinic = new Set(rows.flatMap(r => r.clinicDocs));
+    const clinicGrp   = phNames.filter(n =>  namesWithClinic.has(n));
+    const noClinicGrp = phNames.filter(n => !namesWithClinic.has(n));
+    if(!clinicGrp.length || !noClinicGrp.length) return [];
+    // เปรียบเทียบ OPD ต่อ OPD (ไม่ใช่ total)
+    const maxOpdClinic = Math.max(...clinicGrp.map(n => opdC[n]||0));
+    const minOpdNoClinic = Math.min(...noClinicGrp.map(n => opdC[n]||0));
+    const warns = [];
+    // กฎ: OPD(noClinic ทุกคน) ต้องมากกว่า maxOpdClinic อย่างน้อย 2 วัน
+    //     และไม่ควรเกิน maxOpdClinic + 3
+    noClinicGrp.forEach(n => {
+      const o = opdC[n]||0;
+      if(o < maxOpdClinic + 2)
+        warns.push({ name:n, half:halfLabel, opd:o, maxClinic:maxOpdClinic, issue:'OPD น้อยกว่า', required:maxOpdClinic+2 });
+      else if(o > maxOpdClinic + 3)
+        warns.push({ name:n, half:halfLabel, opd:o, maxClinic:maxOpdClinic, issue:'OPD มากกว่าเกิน', required:maxOpdClinic+3 });
+    });
+    return warns;
+  }
+  const warns1 = checkRules(h1rows, '1–15');
+  const warns2 = checkRules(h2rows, '16–31');
+  const allWarns = [...warns1, ...warns2];
+
+  const warnHtml = allWarns.length ? `
+    <div class="alert a-warn" style="margin-bottom:1rem;flex-direction:column;align-items:flex-start;gap:4px">
+      <div style="font-weight:700;margin-bottom:4px"><i class="fas fa-exclamation-triangle"></i> กฎ OPD ไม่ผ่าน:</div>
+      ${allWarns.map(w =>
+        `<div style="font-size:.8rem">• <b>${w.name}</b> (${w.half}): OPD ${w.opd} — ${w.issue} (max OPD คนมีคลินิก ${w.maxClinic}, ควรอยู่ที่ ${w.required}) — กด <b>จัดใหม่</b></div>`
+      ).join('')}
+    </div>` :
+    `<div class="alert a-success" style="margin-bottom:1rem"><i class="fas fa-check-circle"></i>
+      OPD คนไม่มีคลินิก มากกว่า OPD คนมีคลินิกสูงสุด ครบ 2–3 วัน ✓
+    </div>`;
+
+  // ── calcStats: คืน array พร้อม inPool flag และ hasClinicInRows flag ──
+  function calcStats(rows, poolSet){
+    const opdC={}, clinC={};
+    rows.forEach(r=>{
+      r.assigned.forEach(n=>{opdC[n]=(opdC[n]||0)+1;});
+      r.clinicDocs.forEach(n=>{clinC[n]=(clinC[n]||0)+1;});
+    });
+    // ตรวจว่าใครมีคลินิกจริงใน rows ชุดนี้
+    const namesWithClinic = new Set(rows.flatMap(r => r.clinicDocs));
+    const names = new Set([...Object.keys(opdC),...Object.keys(clinC)]);
+    const arr = [...names].map(n=>{
+      const o=opdC[n]||0, c=clinC[n]||0, w=getClinicWeight(n);
+      return {
+        n, o, c, w,
+        clinEq:+(c*w).toFixed(2),
+        eq:+(o+c*w).toFixed(2),
+        inPool: poolSet ? poolSet.has(n) : poolAllSet.has(n),
+        hasClinic: namesWithClinic.has(n)   // มีคลินิกจริงใน half นี้
+      };
+    });
+    arr.sort((a,b)=>{
+      if(a.inPool !== b.inPool) return b.inPool - a.inPool;
+      return b.eq - a.eq;
+    });
+    return arr;
+  }
+
+  const statsAll = calcStats(allWork, poolAllSet);
+  const stats1   = calcStats(h1rows,  poolH1Set);
+  const stats2   = calcStats(h2rows,  poolH2Set);
+  const maxEq    = statsAll.length ? Math.max(...statsAll.map(s=>s.eq),1) : 1;
+
+  // ── สร้างแถวตาราง แยก 3 กลุ่ม: (1) วน OPD ไม่มีคลินิก, (2) วน OPD มีคลินิก, (3) คลินิกเท่านั้น ──
+  function summaryRows(stats, maxE, showBar){
+    if(!stats.length) return `<tr><td colspan="${showBar?6:5}" style="text-align:center;color:var(--mu)">ไม่มีข้อมูล</td></tr>`;
+
+    // กลุ่ม 1: อยู่ใน OPD pool และ ไม่มีคลินิกใน half นี้
+    const poolNoClinic  = stats.filter(s => s.inPool && !s.hasClinic);
+    // กลุ่ม 2: อยู่ใน OPD pool และ มีคลินิกใน half นี้
+    const poolWithClinic = stats.filter(s => s.inPool && s.hasClinic);
+    // กลุ่ม 3: ไม่ได้อยู่ใน pool (คลินิกเท่านั้น)
+    const clinOnly      = stats.filter(s => !s.inPool);
+
+    function groupStat(grp){
+      if(!grp.length) return null;
+      const eqs = grp.map(s=>s.eq);
+      const avg  = eqs.reduce((a,b)=>a+b,0)/eqs.length;
+      const mn   = Math.min(...eqs), mx = Math.max(...eqs);
+      const balanced = (mx-mn)<=2;
+      return {avg, mn, mx, range:(mx-mn).toFixed(1), balanced};
+    }
+    const gs1 = groupStat(poolNoClinic);
+    const gs2 = groupStat(poolWithClinic);
+    const gs3 = groupStat(clinOnly);
+
+    function statBar(gs, label, cols){
+      if(!gs) return '';
+      return `<tr style="background:rgba(46,164,255,.035)">
+        <td colspan="${cols}" style="font-size:.71rem;color:var(--mu);padding:.35rem .65rem;border-top:2px solid var(--bd2)">
+          <span style="font-weight:700;color:var(--tx)">${label}</span> &nbsp;
+          เฉลี่ย <b style="color:var(--tx)">${gs.avg.toFixed(1)}</b> &nbsp;|&nbsp;
+          min <b style="color:var(--gn)">${gs.mn.toFixed(1)}</b> &nbsp;max <b style="color:var(--ac2)">${gs.mx.toFixed(1)}</b> &nbsp;
+          spread <b style="color:${gs.balanced?'var(--gn)':'var(--ac2)'}">${gs.range}</b>
+          ${gs.balanced?' <span style="color:var(--gn)">✓ สมดุล</span>':' <span style="color:var(--ac2)">⚠ จัดใหม่</span>'}
+        </td>
+      </tr>`;
+    }
+
+    function makeRow(s, avg, maxE, showBar, style){
+      // style: 'noClinic' | 'withClinic' | 'clinOnly'
+      const wBadge=(!hideWeightBadge&&s.w!==undefined&&s.w!==1.5)?`<span style="font-size:.62rem;background:rgba(188,140,255,.2);color:var(--pu);border-radius:3px;padding:1px 5px;margin-left:4px">×${s.w}</span>`:'';
+      const bg     = style==='noClinic' ? 'rgba(63,185,80,.06)' : style==='withClinic' ? 'rgba(46,164,255,.06)' : 'rgba(240,176,64,.07)';
+      const bdrClr = style==='noClinic' ? 'rgba(63,185,80,.5)'  : style==='withClinic' ? 'rgba(46,164,255,.4)' : 'rgba(240,176,64,.4)';
+      const dotClr = style==='noClinic' ? 'var(--gn)' : style==='withClinic' ? 'var(--ac)' : 'var(--ye)';
+      const border = `border-left:3px solid ${bdrClr}`;
+      const dot    = `<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${dotClr};margin-right:5px;flex-shrink:0"></span>`;
+      const opdClr = style==='noClinic' ? 'var(--gn)' : style==='withClinic' ? 'var(--ac)' : 'var(--mu)';
+      const diff   = s.eq - avg;
+      const dCol   = Math.abs(diff)<=0.75?'var(--gn)':Math.abs(diff)<=1.5?'var(--ye)':'var(--ac2)';
+      const dStr   = (diff>=0?'+':'')+diff.toFixed(1);
+      return `<tr style="background:${bg}">
+        <td style="${border};padding-left:.5rem"><div style="display:flex;align-items:center">${dot}<b>${s.n}</b>${wBadge}</div></td>
+        <td style="text-align:center;color:${opdClr};font-weight:700">${s.o>0?s.o:'—'}</td>
+        <td style="text-align:center;color:var(--ye);font-weight:700">${s.c>0?s.c:'—'}</td>
+        <td style="text-align:center;color:rgba(240,176,64,.7);font-size:.74rem">${s.c>0?'= '+s.clinEq.toFixed(1):'—'}</td>
+        <td style="text-align:center;font-weight:700;color:var(--gn)">${s.eq.toFixed(1)}
+          <span style="font-size:.67rem;color:${dCol};margin-left:2px">(${dStr})</span>
+        </td>
+        ${showBar?`<td style="min-width:90px"><div class="prog" style="height:7px">
+          <div class="prog-o" style="width:${(s.o/maxE*100).toFixed(1)}%"></div>
+          <div class="prog-c" style="width:${(s.clinEq/maxE*100).toFixed(1)}%"></div>
+        </div></td>`:''}
+      </tr>`;
+    }
+
+    const COLS = showBar ? 6 : 5;
+    let rows = '';
+
+    // ── กลุ่ม 1: วน OPD ไม่มีคลินิกใน half นี้ ──
+    if(poolNoClinic.length){
+      rows += `<tr>
+        <td colspan="${COLS}" style="background:rgba(63,185,80,.1);padding:.3rem .65rem;font-size:.71rem;font-weight:700;color:#3fb950;letter-spacing:.04em;border-top:2px solid rgba(63,185,80,.3)">
+          <i class="fas fa-circle" style="font-size:.5rem;margin-right:5px"></i> วน OPD — ไม่มีคลินิกพิเศษ (${poolNoClinic.length} คน)
+        </td>
+      </tr>`;
+      rows += statBar(gs1, 'ภาระกลุ่มนี้', COLS);
+      const g1avg = gs1 ? gs1.avg : 0;
+      rows += poolNoClinic.map(s=>makeRow(s, g1avg, maxE, showBar, 'noClinic')).join('');
+    }
+
+    // ── กลุ่ม 2: วน OPD มีคลินิกใน half นี้ ──
+    if(poolWithClinic.length){
+      rows += `<tr>
+        <td colspan="${COLS}" style="background:rgba(46,164,255,.12);padding:.3rem .65rem;font-size:.71rem;font-weight:700;color:#7ec8ff;letter-spacing:.04em;border-top:2px solid rgba(46,164,255,.3)">
+          <i class="fas fa-star" style="font-size:.5rem;margin-right:5px"></i> วน OPD — มีคลินิกพิเศษ (${poolWithClinic.length} คน)
+        </td>
+      </tr>`;
+      rows += statBar(gs2, 'ภาระกลุ่มนี้', COLS);
+      const g2avg = gs2 ? gs2.avg : 0;
+      rows += poolWithClinic.map(s=>makeRow(s, g2avg, maxE, showBar, 'withClinic')).join('');
+    }
+
+    // ── กลุ่ม 3: คลินิกพิเศษเท่านั้น ──
+    if(clinOnly.length){
+      rows += `<tr>
+        <td colspan="${COLS}" style="background:rgba(240,176,64,.12);padding:.3rem .65rem;font-size:.71rem;font-weight:700;color:#f0c060;letter-spacing:.04em;border-top:2px solid rgba(240,176,64,.3)">
+          <i class="fas fa-calendar-alt" style="font-size:.5rem;margin-right:5px"></i> คลินิกพิเศษเท่านั้น / ไม่ได้วน OPD (${clinOnly.length} คน)
+        </td>
+      </tr>`;
+      rows += statBar(gs3, 'ภาระกลุ่มนี้', COLS);
+      const g3avg = gs3 ? gs3.avg : 0;
+      rows += clinOnly.map(s=>makeRow(s, g3avg, maxE, showBar, 'clinOnly')).join('');
+    }
+
+    return rows;
+  }
+
+  // ── thead templates ──
+  function thead(showBar){
+    return `<thead><tr>
+      <th>แพทย์</th>
+      <th style="text-align:center"><span style="color:var(--ac)">OPD</span><br><span style="font-size:.61rem;font-weight:400">ครั้ง</span></th>
+      <th style="text-align:center"><span style="color:var(--ye)">OPD พิเศษ</span><br><span style="font-size:.61rem;font-weight:400">ครั้ง</span></th>
+      <th style="text-align:center"><span style="color:rgba(240,176,64,.7)">×1.5</span><br><span style="font-size:.61rem;font-weight:400">เทียบ</span></th>
+      <th style="text-align:center"><span style="color:var(--gn)">รวม</span><br><span style="font-size:.61rem;font-weight:400">เทียบ OPD</span></th>
+      ${showBar?'<th style="min-width:90px">สัดส่วน</th>':''}
+    </tr></thead>`;
+  }
+
+  const maxE1 = stats1.length ? Math.max(...stats1.map(s=>s.eq),1) : 1;
+  const maxE2 = stats2.length ? Math.max(...stats2.map(s=>s.eq),1) : 1;
+  const workDays=allWork.length, h1Days=h1rows.length, h2Days=h2rows.length;
+
+  const legend = `
+  <div style="display:flex;gap:14px;flex-wrap:wrap;font-size:.73rem;color:var(--mu);margin-bottom:.9rem;align-items:center">
+    <div style="display:flex;align-items:center;gap:5px">
+      <span style="width:14px;height:14px;border-radius:3px;background:rgba(63,185,80,.18);border:1px solid rgba(63,185,80,.5);flex-shrink:0"></span>
+      <b style="color:#3fb950">วน OPD ไม่มีคลินิก</b> — loop นี้ไม่มีคลินิกพิเศษ → OPD สูงกว่า
+    </div>
+    <div style="display:flex;align-items:center;gap:5px">
+      <span style="width:14px;height:14px;border-radius:3px;background:rgba(46,164,255,.18);border:1px solid rgba(46,164,255,.4);flex-shrink:0"></span>
+      <b style="color:#7ec8ff">วน OPD มีคลินิก</b> — อยู่ใน OPD pool และมีคลินิกพิเศษ
+    </div>
+    <div style="display:flex;align-items:center;gap:5px">
+      <span style="width:14px;height:14px;border-radius:3px;background:rgba(240,176,64,.18);border:1px solid rgba(240,176,64,.4);flex-shrink:0"></span>
+      <b style="color:#f0c060">คลินิกพิเศษเท่านั้น</b> — ไม่ได้อยู่ใน OPD Pool รอบนั้น
+    </div>
+    <div style="color:var(--mu)"><b style="color:var(--tx)">รวม</b> = OPD + (คลินิก × 1.5)</div>
+  </div>`;
+
+  const h = `
+  ${warnHtml}
+  <div class="stat-row">
+    <div class="stat-box"><div class="stat-num">${workDays}</div><div class="stat-lbl">วันทำงานรวม</div></div>
+    <div class="stat-box"><div class="stat-num">${h1Days}</div><div class="stat-lbl">วัน 1–15</div></div>
+    <div class="stat-box"><div class="stat-num">${h2Days}</div><div class="stat-lbl">วัน 16–31</div></div>
+    <div class="stat-box"><div class="stat-num">${sched.filter(r=>r.isHol).length}</div><div class="stat-lbl">วันหยุด</div></div>
+    <div class="stat-box"><div class="stat-num">${workDays*perDay}</div><div class="stat-lbl">Slot OPD</div></div>
+  </div>
+
+  ${legend}
+
+  <!-- FULL MONTH -->
+  <div class="card">
+    <div class="card-title"><i class="fas fa-balance-scale"></i> ภาระงานรวมทั้งเดือน — ${mName} ${yearBE}
+      <button class="btn btn-success btn-sm ml" onclick="exportSummary()"><i class="fas fa-file-excel"></i> Export สรุป</button>
+    </div>
+    <div class="tbl-wrap"><table>${thead(true)}<tbody>${summaryRows(statsAll,maxEq,true)}</tbody></table></div>
+  </div>
+
+  <!-- SPLIT HALVES -->
+  <div class="g2">
+    <div class="card">
+      <div class="card-title"><i class="fas fa-calendar"></i> ครึ่งแรก 1–15 ${mName}
+        <span style="font-size:.72rem;font-weight:400;color:var(--mu);margin-left:5px">${h1Days} วัน</span>
+      </div>
+      <div class="tbl-wrap"><table>${thead(false)}<tbody>${summaryRows(stats1,maxE1,false)}</tbody></table></div>
+    </div>
+    <div class="card">
+      <div class="card-title"><i class="fas fa-calendar"></i> ครึ่งหลัง 16–31 ${mName}
+        <span style="font-size:.72rem;font-weight:400;color:var(--mu);margin-left:5px">${h2Days} วัน</span>
+      </div>
+      <div class="tbl-wrap"><table>${thead(false)}<tbody>${summaryRows(stats2,maxE2,false)}</tbody></table></div>
+    </div>
+  </div>
+
+  <!-- LOOP WARD -->
+  <div class="card">
+    <div class="card-title"><i class="fas fa-sync-alt"></i> Loop วอร์ด — ${mName} ${yearBE}</div>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:.8rem;font-size:.76rem">
+      <div><span class="half-tag" style="margin-right:4px">1–15 OPD Pool:</span>
+        ${pool.h1.map(n=>`<span class="wc wc-opd" style="margin:1px">${n}</span>`).join('')||'<span style="color:var(--mu)">ไม่มี</span>'}
+      </div>
+      <div><span class="half-tag" style="margin-right:4px">16–31 OPD Pool:</span>
+        ${pool.h2.map(n=>`<span class="wc wc-opd" style="margin:1px">${n}</span>`).join('')||'<span style="color:var(--mu)">ไม่มี</span>'}
+      </div>
+    </div>
+    <div class="tbl-wrap"><table>
+      <thead><tr><th>#</th><th>แพทย์</th><th><span class="half-tag">1–15</span></th><th><span class="half-tag">16–31</span></th></tr></thead>
+      <tbody>${wardData.doctors.map(d=>{
+        const s=(d.schedule&&d.schedule[mName+' '+yearBE])||{h1:'',h2:''};
+        return`<tr style="${d.isNP?'background:rgba(188,140,255,.07)':''}">
+          <td style="color:var(--mu);font-size:.7rem">${d.seq}</td>
+          <td><b>${d.name}</b></td>
+          <td>${wc(s.h1)}</td><td>${wc(s.h2)}</td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table></div>
+  </div>`;
+
+  document.getElementById('summary-wrap').innerHTML = h;
+}
+
+// ═══════════════════════════════════════════════
+// THAI HOLIDAYS DATABASE
+// ═══════════════════════════════════════════════
+const THAI_HOLIDAYS = {
+  2568: {
+    '2025-01-01': 'วันขึ้นปีใหม่',
+    '2025-02-12': 'วันมาฆบูชา',
+    '2025-04-06': 'วันจักรี (ตรงกับวันอาทิตย์)',
+    '2025-04-07': 'วันหยุดชดเชยวันจักรี',
+    '2025-04-13': 'วันสงกรานต์',
+    '2025-04-14': 'วันสงกรานต์',
+    '2025-04-15': 'วันสงกรานต์',
+    '2025-04-16': 'วันหยุดชดเชยวันสงกรานต์',
+    '2025-05-01': 'วันแรงงานแห่งชาติ',
+    '2025-05-04': 'วันฉัตรมงคล (ตรงกับวันอาทิตย์)',
+    '2025-05-05': 'วันหยุดชดเชยวันฉัตรมงคล',
+    '2025-05-09': 'วันพระราชพิธีพืชมงคลจรดพระนังคัลแรกนาขวัญ',
+    '2025-05-11': 'วันวิสาขบูชา (ตรงกับวันอาทิตย์)',
+    '2025-05-12': 'วันหยุดชดเชยวันวิสาขบูชา',
+    '2025-06-02': 'วันหยุดราชการพิเศษ (ครม.)',
+    '2025-06-03': 'วันเฉลิมพระชนมพรรษาสมเด็จพระนางเจ้าฯ พระบรมราชินี',
+    '2025-07-10': 'วันอาสาฬหบูชา',
+    '2025-07-11': 'วันเข้าพรรษา',
+    '2025-07-28': 'วันเฉลิมพระชนมพรรษาพระบาทสมเด็จพระเจ้าอยู่หัว',
+    '2025-08-11': 'วันหยุดราชการพิเศษ (ครม.)',
+    '2025-08-12': 'วันแม่แห่งชาติ / วันเฉลิมพระชนมพรรษาสมเด็จพระนางเจ้าสิริกิติ์ฯ',
+    '2025-10-13': 'วันคล้ายวันสวรรคต ร.9',
+    '2025-10-23': 'วันปิยมหาราช',
+    '2025-12-05': 'วันพ่อแห่งชาติ / วันคล้ายวันพระบรมราชสมภพ ร.9',
+    '2025-12-10': 'วันรัฐธรรมนูญ (ตรงกับวันพุธ)',
+    '2025-12-31': 'วันสิ้นปี'
+  },
+  2570: {
+    '2027-01-01': 'วันขึ้นปีใหม่',
+    '2027-02-21': 'วันมาฆบูชา',
+    '2027-04-06': 'วันจักรี',
+    '2027-04-13': 'วันสงกรานต์',
+    '2027-04-14': 'วันสงกรานต์',
+    '2027-04-15': 'วันสงกรานต์',
+    '2027-05-01': 'วันแรงงานแห่งชาติ',
+    '2027-05-04': 'วันฉัตรมงคล',
+    '2027-05-21': 'วันวิสาขบูชา',
+    '2027-06-03': 'วันเฉลิมพระชนมพรรษาสมเด็จพระนางเจ้าฯ พระบรมราชินี',
+    '2027-07-18': 'วันอาสาฬหบูชา',
+    '2027-07-19': 'วันเข้าพรรษา',
+    '2027-07-28': 'วันเฉลิมพระชนมพรรษาพระบาทสมเด็จพระเจ้าอยู่หัว',
+    '2027-08-12': 'วันแม่แห่งชาติ',
+    '2027-10-13': 'วันคล้ายวันสวรรคต ร.9',
+    '2027-10-23': 'วันปิยมหาราช',
+    '2027-12-05': 'วันพ่อแห่งชาติ',
+    '2027-12-10': 'วันรัฐธรรมนูญ',
+    '2027-12-31': 'วันสิ้นปี'
+  },
+  2571: {
+    '2028-01-01': 'วันขึ้นปีใหม่',
+    '2028-02-10': 'วันมาฆบูชา',
+    '2028-04-06': 'วันจักรี',
+    '2028-04-13': 'วันสงกรานต์',
+    '2028-04-14': 'วันสงกรานต์',
+    '2028-04-15': 'วันสงกรานต์',
+    '2028-05-01': 'วันแรงงานแห่งชาติ',
+    '2028-05-04': 'วันฉัตรมงคล',
+    '2028-05-09': 'วันวิสาขบูชา',
+    '2028-06-03': 'วันเฉลิมพระชนมพรรษาสมเด็จพระนางเจ้าฯ พระบรมราชินี',
+    '2028-07-06': 'วันอาสาฬหบูชา',
+    '2028-07-07': 'วันเข้าพรรษา',
+    '2028-07-28': 'วันเฉลิมพระชนมพรรษาพระบาทสมเด็จพระเจ้าอยู่หัว',
+    '2028-08-12': 'วันแม่แห่งชาติ',
+    '2028-10-13': 'วันคล้ายวันสวรรคต ร.9',
+    '2028-10-23': 'วันปิยมหาราช',
+    '2028-12-05': 'วันพ่อแห่งชาติ',
+    '2028-12-10': 'วันรัฐธรรมนูญ',
+    '2028-12-31': 'วันสิ้นปี'
+  },
+  2569: {
+    '2026-01-01': 'วันขึ้นปีใหม่',
+    '2026-01-02': 'วันหยุดราชการพิเศษ (ครม.)',
+    '2026-03-03': 'วันมาฆบูชา',
+    '2026-04-06': 'วันจักรี',
+    '2026-04-13': 'วันสงกรานต์',
+    '2026-04-14': 'วันสงกรานต์',
+    '2026-04-15': 'วันสงกรานต์',
+    '2026-05-01': 'วันแรงงานแห่งชาติ',
+    '2026-05-04': 'วันฉัตรมงคล',
+    '2026-06-01': 'วันวิสาขบูชา',
+    '2026-06-03': 'วันเฉลิมพระชนมพรรษาสมเด็จพระนางเจ้าฯ พระบรมราชินี',
+    '2026-07-28': 'วันเฉลิมพระชนมพรรษาพระบาทสมเด็จพระเจ้าอยู่หัว',
+    '2026-07-29': 'วันอาสาฬหบูชา',
+    '2026-07-30': 'วันเข้าพรรษา',
+    '2026-08-12': 'วันแม่แห่งชาติ',
+    '2026-10-13': 'วันคล้ายวันสวรรคต ร.9',
+    '2026-10-23': 'วันปิยมหาราช',
+    '2026-12-05': 'วันพ่อแห่งชาติ',
+    '2026-12-10': 'วันรัฐธรรมนูญ',
+    '2026-12-31': 'วันสิ้นปี'
+  }
+};
+
+function loadThaiHolidays(yearBE){
+  const data = THAI_HOLIDAYS[yearBE];
+  if(!data){ toast('ยังไม่มีข้อมูลปี '+yearBE,'err'); return; }
+  let added=0;
+  Object.entries(data).forEach(([date,name])=>{
+    if(!holidays[date]){ holidays[date]=name; added++; }
+  });
+  saveHol(); renderHols();
+  toast(`โหลดวันหยุด ${yearBE} สำเร็จ — ${added} วัน ✓`);
+}
+
+function clearAllHol(){
+  if(!confirm('ล้างวันหยุดทั้งหมด?')) return;
+  holidays={};
+  saveHol(); renderHols();
+  toast('ล้างวันหยุดแล้ว');
+}
+
+// ═══════════════════════════════════════════════
+// HOLIDAYS
+// ═══════════════════════════════════════════════
+function addHol(){
+  const d=document.getElementById('hol-date').value;
+  const n=document.getElementById('hol-name').value.trim();
+  if(!d||!n){toast('กรอกวันที่และชื่อ');return;}
+  holidays[d]=n;saveHol();renderHols();
+  document.getElementById('hol-date').value='';
+  document.getElementById('hol-name').value='';
+  toast('เพิ่มวันหยุดสำเร็จ ✓');
+}
+function removeHol(d){delete holidays[d];saveHol();renderHols();}
+function renderHols(){
+  const el=document.getElementById('hol-list');
+  const cnt=document.getElementById('hol-count');
+  const keys=Object.keys(holidays).sort();
+  if(cnt) cnt.textContent = keys.length ? `วันหยุดทั้งหมด ${keys.length} วัน` : '';
+  if(!keys.length){el.innerHTML='<span style="color:var(--mu);font-size:.79rem">ยังไม่มีวันหยุด — กด "โหลดวันหยุดไทย" ด้านบน</span>';return;}
+  // group by month for readability
+  const byMonth={};
+  keys.forEach(d=>{
+    const ym=d.slice(0,7);
+    if(!byMonth[ym]) byMonth[ym]=[];
+    byMonth[ym].push(d);
+  });
+  el.innerHTML=Object.entries(byMonth).map(([ym,dates])=>{
+    const [y,m]=ym.split('-').map(Number);
+    const mLabel=`<span style="font-size:.7rem;font-weight:700;color:var(--mu);display:block;width:100%;margin:.4rem 0 .2rem;text-transform:uppercase;letter-spacing:.04em">${MONTHS_TH[m-1]} ${y+543}</span>`;
+    const tags=dates.map(d=>{
+      const dy=parseInt(d.split('-')[2]);
+      return`<div class="hol-tag"><i class="fas fa-calendar-times" style="color:var(--ac2)"></i>${dy} — ${holidays[d]}<span class="hol-rm" onclick="removeHol('${d}')"><i class="fas fa-times"></i></span></div>`;
+    }).join('');
+    return`<div style="display:contents">${mLabel}${tags}</div>`;
+  }).join('');
+}
+
+// ═══════════════════════════════════════════════
+// EXPORTS
+// ═══════════════════════════════════════════════
+function exportWard(){
+  const M=wardData.monthColumns;
+  const wb=XLSX.utils.book_new();
+  const hdr=['#','แพทย์'];
+  M.forEach(m=>{hdr.push(`${m} 1-15`,`${m} 16-31`);});
+  const rows=[hdr];
+  wardData.doctors.forEach(d=>{
+    const row=[d.seq,d.name];
+    M.forEach(m=>{const s=(d.schedule&&d.schedule[m])||{h1:'',h2:''};row.push(s.h1||'',s.h2||'');});
+    rows.push(row);
+  });
+  const ws=XLSX.utils.aoa_to_sheet(rows);
+  ws['!cols']=[{wch:5},{wch:18},...M.flatMap(()=>[{wch:14},{wch:14}])];
+  XLSX.utils.book_append_sheet(wb,ws,'Loop วอร์ด');
+  XLSX.writeFile(wb,'ตารางหลัก_Loop.xlsx');
+  toast('Export Ward สำเร็จ ✓');
+}
+
+function exportClinic(){
+  const wb=XLSX.utils.book_new();
+  const hdr=['สัปดาห์',...DAYS_F.slice(1)];
+  const rows=[hdr];
+  for(let w=1;w<=5;w++){
+    const row=[`สัปดาห์ ${w}`];
+    for(let dow=1;dow<=5;dow++)row.push(((clinicSchedule[w]&&clinicSchedule[w][dow])||[]).join(', '));
+    rows.push(row);
+  }
+  const ws=XLSX.utils.aoa_to_sheet(rows);
+  ws['!cols']=[{wch:12},...Array(5).fill({wch:40})];
+  XLSX.utils.book_append_sheet(wb,ws,'คลินิกพิเศษ');
+  XLSX.writeFile(wb,'ตาราง_คลินิกพิเศษ.xlsx');
+  toast('Export คลินิกสำเร็จ ✓');
+}
+
+function exportOPD(){
+  if(!lastOPDSched.length){toast('สร้างตาราง OPD ก่อน');return;}
+  const mIdx=parseInt(document.getElementById('opd-month').value);
+  const yearBE=parseInt(document.getElementById('opd-year').value);
+  const perDay=parseInt(document.getElementById('opd-per-day').value)||4;
+  const wb=XLSX.utils.book_new();
+  const hdr=['วันที่','วัน','ครึ่งเดือน'];
+  for(let i=1;i<=perDay;i++)hdr.push(`แพทย์ ${i}`);
+  hdr.push('คลินิกพิเศษ','วันหยุด');
+  const rows=[hdr];
+  lastOPDSched.forEach(r=>{
+    const[y,m,d]=r.date.split('-').map(Number);
+    const row=[`${d}/${m}/${y+543}`,DAYS_F[r.dow],r.half==='h1'?'1-15':'16-31'];
+    for(let i=0;i<perDay;i++)row.push(r.assigned[i]||'');
+    row.push(r.clinicDocs.join(', '),r.isHol?r.holName:'');
+    rows.push(row);
+  });
+  const ws=XLSX.utils.aoa_to_sheet(rows);
+  ws['!cols']=[{wch:10},{wch:10},{wch:10},...Array(perDay).fill({wch:16}),{wch:40},{wch:20}];
+  XLSX.utils.book_append_sheet(wb,ws,'OPD');
+  XLSX.writeFile(wb,`ตาราง_OPD_${MONTHS_TH[mIdx]}_${yearBE}.xlsx`);
+  toast('Export OPD สำเร็จ ✓');
+}
+
+function exportSummary(){
+  if(!lastOPDSched.length){toast('สร้างตาราง OPD ก่อน');return;}
+  const mIdx=parseInt(document.getElementById('opd-month').value);
+  const yearBE=parseInt(document.getElementById('opd-year').value);
+
+  function buildStats(rows){
+    const opdC={},clinC={};
+    rows.forEach(r=>{
+      r.assigned.forEach(n=>{opdC[n]=(opdC[n]||0)+1;});
+      r.clinicDocs.forEach(n=>{clinC[n]=(clinC[n]||0)+1;});
+    });
+    const names=new Set([...Object.keys(opdC),...Object.keys(clinC)]);
+    return[...names].map(n=>{
+      const o=opdC[n]||0,c=clinC[n]||0,w=getClinicWeight(n);
+      return[n,o,c,w,(o+c*w).toFixed(1)];
+    }).sort((a,b)=>parseFloat(b[4])-parseFloat(a[4]));
+  }
+
+  const allWork=lastOPDSched.filter(r=>!r.isHol);
+  const h1rows=allWork.filter(r=>r.half==='h1');
+  const h2rows=allWork.filter(r=>r.half==='h2');
+
+  const hdr=['แพทย์','OPD (ครั้ง)','OPD พิเศษ (ครั้ง)','น้ำหนัก (×)','รวมทั้งหมด (เทียบ OPD)'];
+  const wb=XLSX.utils.book_new();
+
+  const wsAll=XLSX.utils.aoa_to_sheet([hdr,...buildStats(allWork)]);
+  wsAll['!cols']=[{wch:20},{wch:14},{wch:18},{wch:22},{wch:22}];
+  XLSX.utils.book_append_sheet(wb,wsAll,`สรุปรวม ${MONTHS_TH[mIdx]}`);
+
+  const ws1=XLSX.utils.aoa_to_sheet([hdr,...buildStats(h1rows)]);
+  ws1['!cols']=[{wch:20},{wch:14},{wch:18},{wch:22},{wch:22}];
+  XLSX.utils.book_append_sheet(wb,ws1,`ครึ่งแรก 1-15`);
+
+  const ws2=XLSX.utils.aoa_to_sheet([hdr,...buildStats(h2rows)]);
+  ws2['!cols']=[{wch:20},{wch:14},{wch:18},{wch:22},{wch:22}];
+  XLSX.utils.book_append_sheet(wb,ws2,`ครึ่งหลัง 16-31`);
+
+  XLSX.writeFile(wb,`สรุป_ภาระงาน_${MONTHS_TH[mIdx]}_${yearBE}.xlsx`);
+  toast('Export สรุปสำเร็จ ✓');
+}
+
+// ═══════════════════════════════════════════════
+// TOAST
+// ═══════════════════════════════════════════════
+function toast(msg,type='ok'){
+  const t=document.getElementById('toast');
+  t.textContent=msg;
+  t.className=`show toast-${type}`;
+  clearTimeout(t._timer);
+  t._timer=setTimeout(()=>{t.className='';},2800);
+}
+
+// ═══════════════════════════════════════════════
+// EXPORT / IMPORT SETTINGS (ข้ามเครื่อง)
+// ═══════════════════════════════════════════════
+function exportSettings(){
+  const payload = {
+    _version: 'opd-scheduler-v11',
+    _exported: new Date().toISOString(),
+    ward:        JSON.parse(localStorage.getItem(LS_WARD)    || 'null'),
+    clinic:      JSON.parse(localStorage.getItem(LS_CLINIC)  || 'null'),
+    holidays:    JSON.parse(localStorage.getItem(LS_HOL)     || 'null'),
+    weights:     JSON.parse(localStorage.getItem(LS_WEIGHT)  || 'null'),
+    hideWeight:  JSON.parse(localStorage.getItem(LS_HIDE_WEIGHT) || 'false'),
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], {type:'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  const d = new Date();
+  a.download = `opd-settings-${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}.json`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+  toast('Export Settings สำเร็จ ✓ — นำไฟล์ไปใช้เครื่องอื่นได้เลย');
+}
+
+function importSettings(input){
+  const file = input.files[0];
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    try{
+      const p = JSON.parse(e.target.result);
+      if(!p._version || !p._version.startsWith('opd-scheduler')){
+        toast('ไฟล์ไม่ถูกต้อง — ต้องเป็นไฟล์ที่ Export จากโปรแกรมนี้เท่านั้น','error');
+        return;
+      }
+      // confirm ก่อน overwrite
+      if(!confirm(`นำเข้าการตั้งค่าจากไฟล์:\n"${file.name}"\n(Export เมื่อ: ${new Date(p._exported).toLocaleString('th-TH')})\n\nข้อมูลปัจจุบันในเครื่องนี้จะถูกแทนที่ทั้งหมด\nยืนยันหรือไม่?`)) return;
+
+      if(p.ward)       localStorage.setItem(LS_WARD,    JSON.stringify(p.ward));
+      if(p.clinic)     localStorage.setItem(LS_CLINIC,  JSON.stringify(p.clinic));
+      if(p.holidays)   localStorage.setItem(LS_HOL,     JSON.stringify(p.holidays));
+      if(p.weights)    localStorage.setItem(LS_WEIGHT,  JSON.stringify(p.weights));
+      localStorage.setItem(LS_HIDE_WEIGHT, JSON.stringify(p.hideWeight||false));
+
+      toast('Import สำเร็จ ✓ — รีโหลดหน้าเพื่อดูข้อมูลใหม่...');
+      setTimeout(() => location.reload(), 1500);
+    } catch(err){
+      toast('อ่านไฟล์ไม่ได้: '+err.message,'error');
+    }
+    input.value = '';
+  };
+  reader.readAsText(file, 'utf-8');
+}
+
+
+
+let importData = [];
+
+function handleImport(input){
+  const file = input.files[0];
+  if(!file) return;
+  document.getElementById('import-file-label').textContent = file.name;
+
+  const reader = new FileReader();
+  reader.onload = e => {
+    try{
+      const wb = XLSX.read(new Uint8Array(e.target.result), {type:'array'});
+      const sheetName = document.getElementById('import-sheet-name').value.trim() || wb.SheetNames[0];
+      const ws = wb.Sheets[sheetName] || wb.Sheets[wb.SheetNames[0]];
+      if(!ws){ toast('ไม่พบ sheet ที่ระบุ','error'); return; }
+
+      const headerRow = parseInt(document.getElementById('import-header-row').value)||2;
+      const rows = XLSX.utils.sheet_to_json(ws, {header:1, defval:''});
+      const hIdx = headerRow - 1;
+      if(hIdx >= rows.length){ toast('Header row เกินจำนวนแถวในไฟล์','error'); return; }
+
+      const headers = rows[hIdx].map(h => String(h||'').trim());
+
+      // หาคอลัมน์ OPD 1-4 อัตโนมัติ
+      const opdCols = [];
+      headers.forEach((h, i) => {
+        if(/^opd\s*[1-4]$/i.test(h.replace(/[_\-]/g,' '))) opdCols.push(i);
+      });
+      // fallback
+      if(!opdCols.length){
+        headers.forEach((h,i) => { if(/opd/i.test(h)) opdCols.push(i); });
+      }
+
+      const colInfo = opdCols.map(i => headers[i]).join(', ');
+      document.getElementById('import-col-detect').innerHTML =
+        opdCols.length
+          ? `<span style="color:var(--gn)"><i class="fas fa-check-circle"></i> พบคอลัมน์: <b>${colInfo}</b> (${opdCols.length} คอลัมน์)</span>`
+          : `<span style="color:var(--ac2)"><i class="fas fa-exclamation-circle"></i> ไม่พบคอลัมน์ OPD 1-4 — ตรวจสอบ header row หรือชื่อคอลัมน์</span>`;
+
+      if(!opdCols.length){ toast('ไม่พบคอลัมน์ OPD 1-4','error'); return; }
+
+      // หาคอลัมน์วันที่ (เอาไว้แสดง detail)
+      const dateCol = headers.findIndex(h => /วัน(ที่)?|date/i.test(h));
+
+      const countMap = {}, daysMap = {};
+
+      for(let r = hIdx+1; r < rows.length; r++){
+        const row = rows[r];
+        if(!row || row.every(c => c==='')) continue;
+        const dateVal = dateCol >= 0 ? String(row[dateCol]||'').trim() : `แถว ${r+1}`;
+
+        opdCols.forEach(ci => {
+          let name = String(row[ci]||'').trim();
+          if(!name) return;
+          // normalize: ลบวงเล็บและตัวเลขท้าย เช่น "อาทร (3)" → "อาทร"
+          name = name.replace(/\s*\(.*?\)/g,'').replace(/\s+/g,' ').trim();
+          if(!name) return;
+          countMap[name] = (countMap[name]||0) + 1;
+          if(!daysMap[name]) daysMap[name] = [];
+          daysMap[name].push(dateVal);
+        });
+      }
+
+      importData = Object.entries(countMap)
+        .map(([name, count]) => ({ name, count, days: daysMap[name]||[] }))
+        .sort((a,b) => b.count - a.count);
+
+      renderImportResult();
+      toast(`อ่านไฟล์สำเร็จ พบ ${importData.length} คน`);
+    } catch(err){
+      console.error(err);
+      toast('เกิดข้อผิดพลาด: '+err.message,'error');
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function renderImportResult(){
+  if(!importData.length) return;
+  document.getElementById('import-result').style.display = 'block';
+
+  const total  = importData.reduce((s,d)=>s+d.count,0);
+  const maxCnt = importData[0].count;
+  const minCnt = importData[importData.length-1].count;
+  const avg    = total/importData.length;
+  const spread = maxCnt - minCnt;
+
+  document.getElementById('import-stats-bar').innerHTML = `
+    <div><span style="color:var(--mu);font-size:.72rem">แพทย์ทั้งหมด</span><br><b style="font-size:1.1rem;color:var(--tx)">${importData.length} คน</b></div>
+    <div><span style="color:var(--mu);font-size:.72rem">OPD รวม (slot)</span><br><b style="font-size:1.1rem;color:var(--ac)">${total} ครั้ง</b></div>
+    <div><span style="color:var(--mu);font-size:.72rem">เฉลี่ย/คน</span><br><b style="font-size:1.1rem;color:var(--tx)">${avg.toFixed(1)} วัน</b></div>
+    <div><span style="color:var(--mu);font-size:.72rem">มากสุด</span><br><b style="font-size:1.1rem;color:var(--gn)">${maxCnt} วัน</b></div>
+    <div><span style="color:var(--mu);font-size:.72rem">น้อยสุด</span><br><b style="font-size:1.1rem;color:var(--ac2)">${minCnt} วัน</b></div>
+    <div><span style="color:var(--mu);font-size:.72rem">spread</span><br>
+      <b style="font-size:1.1rem;color:${spread<=3?'var(--gn)':spread<=5?'var(--ye)':'var(--ac2)'}">${spread} วัน</b>
+      <span style="font-size:.7rem;color:${spread<=3?'var(--gn)':spread<=5?'var(--ye)':'var(--ac2)'};margin-left:4px">${spread<=3?'✓ สมดุล':spread<=5?'⚠ ปานกลาง':'⚠ ห่างมาก'}</span>
+    </div>
+  `;
+
+  const tbody = document.getElementById('import-tbody');
+  tbody.innerHTML = importData.map((d, i) => {
+    const barW  = (d.count/maxCnt*100).toFixed(1);
+    const diff  = d.count - avg;
+    const dStr  = (diff>=0?'+':'')+diff.toFixed(1);
+    const dCol  = Math.abs(diff)<=1?'var(--gn)':Math.abs(diff)<=2.5?'var(--ye)':'var(--ac2)';
+    const rowBg = i%2===0?'transparent':'rgba(255,255,255,.018)';
+    return `<tr style="border-bottom:1px solid var(--bd);background:${rowBg};cursor:pointer;transition:background .12s"
+              onmouseover="this.style.background='rgba(46,164,255,.07)'"
+              onmouseout="this.style.background='${rowBg}'"
+              onclick="showImportDetail('${d.name.replace(/'/g,"\\'")}')">
+      <td style="padding:.48rem .8rem;font-size:.76rem;color:var(--mu)">${i+1}</td>
+      <td style="padding:.48rem .8rem;font-weight:700">${d.name}</td>
+      <td style="padding:.48rem .8rem;text-align:center">
+        <b style="font-size:1.05rem;color:var(--ac)">${d.count}</b>
+        <span style="font-size:.72rem;color:${dCol};margin-left:5px">(${dStr})</span>
+      </td>
+      <td style="padding:.48rem 1rem;min-width:180px">
+        <div style="background:var(--s3);border-radius:4px;height:9px;overflow:hidden">
+          <div style="height:100%;width:${barW}%;background:linear-gradient(90deg,var(--ac),var(--pu));border-radius:4px"></div>
+        </div>
+        <div style="font-size:.67rem;color:var(--mu);margin-top:2px">${barW}% ของสูงสุด</div>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function showImportDetail(name){
+  const d = importData.find(x=>x.name===name);
+  if(!d) return;
+  document.getElementById('import-detail-card').style.display='block';
+  document.getElementById('import-detail-name').textContent=`${name} (${d.count} วัน)`;
+  document.getElementById('import-detail-days').innerHTML =
+    d.days.map(day=>
+      `<span style="background:var(--s3);border:1px solid var(--bd2);border-radius:5px;padding:3px 9px;color:var(--ac);font-size:.76rem">${day}</span>`
+    ).join('');
+  document.getElementById('import-detail-card').scrollIntoView({behavior:'smooth',block:'nearest'});
+}
+
+function exportImportResult(){
+  if(!importData.length){ toast('ไม่มีข้อมูล','error'); return; }
+  const avg = importData.reduce((s,d)=>s+d.count,0)/importData.length;
+  const wsData = [
+    ['ลำดับ','ชื่อแพทย์','OPD (วัน)','เทียบเฉลี่ย','วันที่ออก OPD'],
+    ...importData.map((d,i)=>[
+      i+1, d.name, d.count,
+      (d.count-avg>=0?'+':'')+(d.count-avg).toFixed(1),
+      d.days.join(', ')
+    ])
+  ];
+  const ws = XLSX.utils.aoa_to_sheet(wsData);
+  ws['!cols']=[{wch:6},{wch:22},{wch:12},{wch:12},{wch:80}];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,ws,'สรุปภาระ OPD');
+  XLSX.writeFile(wb,`สรุปภาระ_OPD_import.xlsx`);
+  toast('Export สำเร็จ ✓');
+}
+</script>
+</body>
+</html>
