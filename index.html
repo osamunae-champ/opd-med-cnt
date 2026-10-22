@@ -805,6 +805,9 @@ const LS_WARD='opd_ward_v11';
 const LS_CLINIC='opd_clinic_v11';
 const LS_HOL='opd_hol_v11';
 const LS_OPD_SCHED='opd_sched_v11';
+// แพทย์ที่ไม่อยู่ใน Loop วอร์ด แต่ต้องเลือกได้ในคลินิกพิเศษ/ตัวคูณ/แก้ OPD
+const EXTRA_DOCS=['ธมนวรรณ'];
+function allDoctorNames(){ return [...new Set([...wardData.doctors.map(d=>d.name), ...EXTRA_DOCS])]; }
 
 // ═══════════════════════════════════════════════
 // DEFAULT DATA
@@ -884,7 +887,7 @@ function renderWeightEditor(){
   if(!el)return;
   const toggle=document.getElementById('hide-weight-toggle');
   if(toggle)toggle.checked=hideWeightBadge;
-  const allDocs=wardData.doctors.map(d=>d.name);
+  const allDocs=allDoctorNames();
   el.innerHTML=`
   <table>
     <thead><tr>
@@ -1350,7 +1353,7 @@ function saveDoctorNames(){
 // CLINIC EDITOR
 // ═══════════════════════════════════════════════
 function renderClinicEditor(){
-  const allDocs=wardData.doctors.map(d=>d.name);
+  const allDocs=allDoctorNames();
   let h='';
   for(let w=1;w<=5;w++){
     h+=`<div class="week-block">
@@ -1664,7 +1667,7 @@ function reshuffleOPD(){
 // RENDER OPD TABLE
 // ═══════════════════════════════════════════════
 function renderOPDTable(sched,perDay){
-  const allDocNames = [...new Set(wardData.doctors.map(d=>d.name)), 'ธมนวรรณ'];
+  const allDocNames = allDoctorNames();
 
   let h=`
   <div style="display:flex;align-items:center;gap:8px;margin-bottom:.7rem;flex-wrap:wrap">
@@ -1773,7 +1776,7 @@ function editOPDCell(td, rowIdx, slotIdx){
     row.assigned.forEach(n => { if(n) opdCount[n]=(opdCount[n]||0)+1; });
   });
 
-  const allNames = [...new Set([...wardData.doctors.map(d=>d.name), 'ธมนวรรณ'])];
+  const allNames = allDoctorNames();
 
   // ── แยกกลุ่ม: คนที่วน OPD ใน half นี้ vs คนพิเศษ ──
   const mIdx2  = _lastOPDMeta.mIdx  != null ? _lastOPDMeta.mIdx  : parseInt(document.getElementById('opd-month').value);
