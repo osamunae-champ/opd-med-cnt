@@ -91,7 +91,7 @@ localStorage (ของแต่ละเครื่อง)  ⇄  Firestore doc
 5. `commitOPDEdit()` ใช้เดือน/ปีจาก selector ไม่ใช่ `_lastOPDMeta` (สรุปผิดเดือนได้ถ้าเปลี่ยน selector ระหว่างแก้)
 6. Admin สองเครื่องแก้พร้อมกัน → push ทีหลังชนะทั้งเอกสาร (last-write-wins)
 7. `getClinicDocs` ใช้ `new Date("YYYY-MM-DD")` (UTC) แล้ว `getDay()` (local) — ถูกในเวลาไทย แต่เพี้ยนถ้าเครื่องอยู่ timezone ติดลบ
-8. ชื่อ `'ธมนวรรณ'` ถูก hardcode เพิ่มในรายชื่อเลือกแพทย์ (`renderOPDTable`, `editOPDCell`)
+8. แพทย์ที่ไม่อยู่ใน Loop วอร์ด (ตอนนี้ `'ธมนวรรณ'`) อยู่ใน `EXTRA_DOCS` → `allDoctorNames()` ใช้ในหน้าคลินิกพิเศษ ตัวคูณ และแก้ OPD · เพิ่มแพทย์นอก loop = เพิ่มชื่อใน `EXTRA_DOCS`
 9. `THAI_HOLIDAYS` มีเฉพาะ 2568–2571 · ข้อความในแท็บวันหยุดยังเขียนว่า "ครอบคลุมปี 2568"
 
 ## Workflow การแก้
