@@ -277,6 +277,7 @@ function checkPW(){
     sessionStorage.setItem('opd_auth','admin');
     document.getElementById('pw-overlay').style.display='none';
     applyAuthMode();
+    if(typeof renderWardTable==='function') renderWardTable();
   } else if(v === _PW_STAFF){
     isAdmin = false;
     sessionStorage.setItem('opd_auth','guest');
@@ -971,6 +972,7 @@ function toggleHideWeight(val){
 // STATE — load from localStorage or use defaults
 // ═══════════════════════════════════════════════
 let wardData, clinicSchedule, holidays, lastOPDSched=[];
+let _wardYear=null; // ปีที่เลือกดูในตาราง Loop วอร์ด (คงไว้ตอน render ใหม่)
 let _lastOPDMeta = { mIdx:null, yearBE:null, perDay:null }; // เก็บ meta ของตารางล่าสุด
 
 function loadState(){
@@ -1307,21 +1309,24 @@ function renderWardTable(){
         </tr>
       </thead>
       <tbody>
-        ${wardRowsForDisplay().map(d=>{
+        ${wardRowsForDisplay().map((d,di)=>{
+          const editable=isAdmin && di<wardData.doctors.length;
           const rowBg=d.isNP?'#1a1230':'var(--sf)';
           const stickyBg=d.isNP?'#1a1230':'var(--sf)';
           return`<tr>
             <td style="color:var(--mu);font-size:.7rem;position:sticky;left:0;background:${stickyBg};z-index:2;box-shadow:1px 0 0 var(--bd2)">${d.seq}</td>
             <td style="position:sticky;left:28px;background:${stickyBg};z-index:2;box-shadow:2px 0 0 var(--ac);font-weight:600;padding-right:.5rem">${d.name}${d.isNP?`<span class="nbadge" style="margin-left:4px">Neuro</span>`:''}</td>
             ${cols.map(k=>{const s=(d.schedule&&d.schedule[k])||{h1:'',h2:''};
-              return`<td style="text-align:center">${wc(s.h1)}</td><td style="text-align:center">${wc(s.h2)}</td>`;}).join('')}
+              return ['h1','h2'].map(hf=>wardCellHtml(d,di,k,hf,s[hf],editable)).join('');}).join('')}
           </tr>`;}).join('')}
       </tbody>
     </table></div></div>`;
   });
   document.getElementById('ward-tbl').innerHTML=h;
+  if(_wardYear && years.includes(_wardYear)) filterWardYear(_wardYear);
 }
 function filterWardYear(y){
+  _wardYear=y;
   document.querySelectorAll('.ward-yr-sec').forEach(el=>el.style.display='none');
   const sec=document.getElementById('wsec-'+y);if(sec)sec.style.display='block';
   document.querySelectorAll('[id^="wyr-"]').forEach(b=>{
@@ -1330,6 +1335,94 @@ function filterWardYear(y){
     b.style.color=on?'#fff':'var(--tx)';
     b.style.borderColor=on?'var(--ac)':'var(--bd2)';
   });
+}
+
+// ═══════════════════════════════════════════════
+// WARD SWAP — Admin สลับตำแหน่งระหว่างแพทย์ในเดือน/ครึ่งเดียวกัน
+// สลับ = แลกค่ากัน 2 คน → ทุกตำแหน่งยังมีคนรับผิดชอบครบ · ช่องที่ต่างจาก pattern (DEFAULT_WARD) ไฮไลต์
+// getOPDPool() อ่าน wardData → ตาราง OPD ที่สร้างหลังสลับจะใช้ loop ใหม่
+// ═══════════════════════════════════════════════
+function wardPatternCell(seq,k,hf){
+  const d=DEFAULT_WARD.doctors.find(x=>String(x.seq)===String(seq));
+  const s=d&&d.schedule&&d.schedule[k];
+  return s?(s[hf]||''):null; // null = ไม่มีใน pattern
+}
+function wardCellHtml(d,di,k,hf,v,editable){
+  const pat=di<wardData.doctors.length?wardPatternCell(d.seq,k,hf):null;
+  const changed=pat!==null && (v||'').trim()!==pat.trim();
+  const st='text-align:center'+(changed?';background:rgba(210,153,34,.18);box-shadow:inset 0 0 0 1px rgba(210,153,34,.6)':'')+(editable?';cursor:pointer':'');
+  const title=changed?`สลับแล้ว (pattern เดิม: ${pat||'—'})`:(editable?'กดเพื่อสลับกับแพทย์คนอื่น':'');
+  const click=editable?` onclick="openWardSwap(${di},'${k}','${hf}')"`:'';
+  return `<td style="${st}" title="${title}"${click}>${wc(v||'')}</td>`;
+}
+function openWardSwap(di,k,hf){
+  if(!isAdmin) return;
+  const me=wardData.doctors[di]; if(!me) return;
+  const cur=d=>((d.schedule&&d.schedule[k])||{})[hf]||'';
+  const hLabel=hf==='h1'?'1–15':'16–31';
+  const others=wardData.doctors.map((d,j)=>({d,j})).filter(o=>o.j!==di);
+  const anyChanged=wardData.doctors.some(d=>{const p=wardPatternCell(d.seq,k,hf);return p!==null&&cur(d).trim()!==p.trim();});
+  const old=document.getElementById('ward-swap-popup'); if(old) old.remove();
+  const popup=document.createElement('div');
+  popup.id='ward-swap-popup';
+  popup.style.cssText='position:fixed;inset:0;z-index:8000;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:1rem';
+  popup.innerHTML=`
+    <div style="background:var(--sf);border:1px solid var(--bd2);border-radius:12px;width:100%;max-width:420px;max-height:80vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.6)">
+      <div style="padding:.9rem 1.1rem;border-bottom:1px solid var(--bd);display:flex;align-items:center;gap:8px">
+        <div>
+          <div style="font-weight:700;font-size:.9rem">สลับ Loop — ${k} (${hLabel})</div>
+          <div style="font-size:.74rem;color:var(--mu)"><b style="color:var(--tx)">${me.name}</b> อยู่ ${wc(cur(me))} · เลือกแพทย์ที่จะแลกตำแหน่งด้วย</div>
+        </div>
+        <button onclick="document.getElementById('ward-swap-popup').remove()" style="margin-left:auto;background:none;border:none;color:var(--mu);font-size:1.1rem;cursor:pointer">✕</button>
+      </div>
+      <div style="overflow-y:auto;padding:.5rem">
+        ${others.map(o=>`
+          <div onclick="doWardSwap(${di},${o.j},'${k}','${hf}')"
+            style="display:flex;align-items:center;gap:8px;padding:.5rem .8rem;border-radius:8px;cursor:pointer;border-left:3px solid rgba(46,164,255,.4);margin-bottom:2px"
+            onmouseover="this.style.background='rgba(46,164,255,.08)'" onmouseout="this.style.background='transparent'">
+            <span style="font-weight:700;flex:1">${o.d.name}${o.d.isNP?' <span class="nbadge">Neuro</span>':''}</span>
+            ${wc(cur(o.d))}
+          </div>`).join('')}
+        ${anyChanged?`
+        <div onclick="resetWardHalf('${k}','${hf}')"
+          style="display:flex;align-items:center;gap:8px;padding:.5rem .8rem;border-radius:8px;cursor:pointer;border:1px dashed var(--ac2);margin-top:.5rem"
+          onmouseover="this.style.background='rgba(247,129,102,.1)'" onmouseout="this.style.background='transparent'">
+          <span style="color:var(--ac2);font-size:.82rem"><i class="fas fa-undo"></i> คืนค่า pattern เดิมของ ${k} (${hLabel}) ทั้งหมด</span>
+        </div>`:''}
+      </div>
+    </div>`;
+  popup.addEventListener('click',e=>{ if(e.target===popup) popup.remove(); });
+  document.body.appendChild(popup);
+}
+function _wardOPDWarn(k){
+  const [mn,y]=k.split(' ');
+  const has=!!localStorage.getItem(getOPDSchedKey(MONTHS_TH.indexOf(mn),parseInt(y)));
+  return has?`\n\n⚠ ${k} มีตาราง OPD บันทึกไว้แล้ว — ตารางเดิมไม่เปลี่ยนเอง ต้องกด "สร้างตาราง OPD" ใหม่ถ้าจะให้ตาม loop ใหม่ (หน้า Staff คำนวณตาม loop ใหม่ทันที)`:'';
+}
+function doWardSwap(a,b,k,hf){
+  if(!isAdmin) return;
+  const A=wardData.doctors[a], B=wardData.doctors[b]; if(!A||!B||a===b) return;
+  [A,B].forEach(d=>{ if(!d.schedule)d.schedule={}; if(!d.schedule[k])d.schedule[k]={h1:'',h2:''}; });
+  const va=A.schedule[k][hf]||'', vb=B.schedule[k][hf]||'';
+  const hLabel=hf==='h1'?'1–15':'16–31';
+  if(!confirm(`สลับ ${k} (${hLabel})\n${A.name}: ${va||'—'} → ${vb||'—'}\n${B.name}: ${vb||'—'} → ${va||'—'}`+_wardOPDWarn(k))) return;
+  A.schedule[k][hf]=vb; B.schedule[k][hf]=va;
+  const p=document.getElementById('ward-swap-popup'); if(p) p.remove();
+  saveWard(); renderWardTable();
+  toast(`สลับ ${A.name} ↔ ${B.name} (${k} ${hLabel}) ✓`);
+}
+function resetWardHalf(k,hf){
+  if(!isAdmin) return;
+  const hLabel=hf==='h1'?'1–15':'16–31';
+  if(!confirm(`คืนค่า pattern เดิมของ ${k} (${hLabel}) ทุกคน?`+_wardOPDWarn(k))) return;
+  wardData.doctors.forEach(d=>{
+    const p=wardPatternCell(d.seq,k,hf); if(p===null) return;
+    if(!d.schedule)d.schedule={}; if(!d.schedule[k])d.schedule[k]={h1:'',h2:''};
+    d.schedule[k][hf]=p;
+  });
+  const pp=document.getElementById('ward-swap-popup'); if(pp) pp.remove();
+  saveWard(); renderWardTable();
+  toast(`คืนค่า ${k} (${hLabel}) แล้ว ✓`);
 }
 
 // ═══════════════════════════════════════════════

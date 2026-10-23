@@ -66,6 +66,7 @@ localStorage (ของแต่ละเครื่อง)  ⇄  Firestore doc
 | `saveOPDSched()` / `loadSchedForMonth()` / `onMonthYearChange()` | เก็บ/โหลดตารางรายเดือนที่คีย์ `opd_sched_<ปี>_<เดือน>` |
 | `renderSummary(...)` | สรุปภาระ: OPD + คลินิก×ตัวคูณ · `checkRules` เตือนเมื่อผิดกฎ gap 2–3 |
 | `saveWard` / `saveClinic` / `saveHol` / `saveWeights` → `markSaved()` → `fbPush()` | ทุกการบันทึกขึ้น cloud |
+| `openWardSwap` / `doWardSwap` / `resetWardHalf` | Admin กดช่องในตาราง Loop วอร์ด → แลกตำแหน่งกับแพทย์อีกคนในเดือน/ครึ่งเดียวกัน (ตำแหน่งครบเสมอ) · ช่องที่ต่างจาก `DEFAULT_WARD` ไฮไลต์ (`wardPatternCell`) · คืนค่า pattern ทั้งครึ่งได้ · บันทึกด้วย `saveWard()` → การจัด OPD ใช้ loop ใหม่ผ่าน `getOPDPool()` · ตาราง OPD ที่บันทึกแล้วไม่เปลี่ยนเอง ต้องสร้างใหม่ |
 | `saveDoctorNames()` | เปลี่ยนชื่อใน wardData + clinicSchedule (ไม่แก้ชื่อในตาราง OPD ที่บันทึกไว้แล้ว) |
 | `exportWard/Clinic/OPD/Summary/ImportResult` | Excel ผ่าน SheetJS |
 | `exportSettings` / `importSettings` | JSON ของ ward/clinic/holidays/weights (ไม่รวมตาราง OPD) |
