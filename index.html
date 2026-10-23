@@ -624,6 +624,8 @@ window.addEventListener('DOMContentLoaded',()=>{
     <div class="card-title"><i class="fas fa-calendar-check"></i> ตาราง OPD รายวัน <span id="opd-label" style="font-weight:400;color:var(--mu);font-size:.78rem"></span></div>
     <div id="opd-wrap"><div style="text-align:center;padding:2rem;color:var(--mu)"><i class="fas fa-calendar-alt" style="font-size:2rem;opacity:.3;display:block;margin-bottom:.5rem"></i>กดสร้างตาราง OPD</div></div>
   </div>
+  <!-- สรุปภาระงาน (ชุดเดียวกับแท็บสรุป · อัปเดตทุกครั้งที่สร้าง/จัดใหม่/แก้ช่อง) -->
+  <div id="opd-summary-wrap"></div>
 </div>
 
 <!-- ═══ SUMMARY ═══ -->
@@ -1047,6 +1049,7 @@ function onMonthYearChange(){
         ยังไม่มีตาราง ${MONTHS_TH[mIdx]} ${yearBE} — กด <b>สร้างตาราง OPD</b>
       </div>`;
     document.getElementById('summary-wrap').innerHTML='';
+    document.getElementById('opd-summary-wrap').innerHTML='';
   }
 }
 
@@ -2382,6 +2385,7 @@ function renderSummary(sched,mIdx,yearBE,perDay){
   </div>`;
 
   document.getElementById('summary-wrap').innerHTML = h;
+  const osw=document.getElementById('opd-summary-wrap'); if(osw) osw.innerHTML = h;
 }
 
 // ═══════════════════════════════════════════════
