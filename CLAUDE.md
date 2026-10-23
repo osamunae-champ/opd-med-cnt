@@ -66,6 +66,7 @@ localStorage (ของแต่ละเครื่อง)  ⇄  Firestore doc
 | `saveOPDSched()` / `loadSchedForMonth()` / `onMonthYearChange()` | เก็บ/โหลดตารางรายเดือนที่คีย์ `opd_sched_<ปี>_<เดือน>` |
 | `renderSummary(...)` | สรุปภาระ: OPD + คลินิก×ตัวคูณ · `checkRules` เตือนเมื่อผิดกฎ gap 2–3 |
 | `saveWard` / `saveClinic` / `saveHol` / `saveWeights` → `markSaved()` → `fbPush()` | ทุกการบันทึกขึ้น cloud |
+| `oncallForMonth` / `renderOncall` | แพทย์เวร: รายชื่อ 13 คน (`DEFAULT_ONCALL.roster`) · ตัวนับ 2 ชุด วันธรรมดา / วันหยุด (ส-อา + holidays) วน 1→13 ต่อเนื่องข้ามเดือน เริ่ม พ.ย. 2569 ธรรมดา 8 · หยุด 7 (ต่อจากไฟล์ประกาศ ต.ค. 2569 — ทดสอบเลขตรงไฟล์ ก.ย.–ต.ค. ครบ 61 วัน) · เก็บใน `opd_oncall_v11` (อยู่ใน `BASE_KEYS`) · `overrides[วันที่]` = แลกเวร (ไม่บังคับใช้) · เลขขึ้นกับ holidays |
 | `openWardSwap` / `doWardSwap` / `resetWardHalf` | Admin กดช่องในตาราง Loop วอร์ด → แลกตำแหน่งกับแพทย์อีกคนในเดือน/ครึ่งเดียวกัน (ตำแหน่งครบเสมอ) · ช่องที่ต่างจาก `DEFAULT_WARD` ไฮไลต์ (`wardPatternCell`) · คืนค่า pattern ทั้งครึ่งได้ · บันทึกด้วย `saveWard()` → การจัด OPD ใช้ loop ใหม่ผ่าน `getOPDPool()` · ตาราง OPD ที่บันทึกแล้วไม่เปลี่ยนเอง ต้องสร้างใหม่ |
 | `saveDoctorNames()` | เปลี่ยนชื่อใน wardData + clinicSchedule (ไม่แก้ชื่อในตาราง OPD ที่บันทึกไว้แล้ว) |
 | `exportWard/Clinic/Summary/ImportResult` | Excel ผ่าน SheetJS |
