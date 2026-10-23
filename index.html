@@ -807,6 +807,9 @@ const LS_HOL='opd_hol_v11';
 const LS_OPD_SCHED='opd_sched_v11';
 // แพทย์ที่ไม่อยู่ใน Loop วอร์ด แต่ต้องเลือกได้ในคลินิกพิเศษ/ตัวคูณ/แก้ OPD
 const EXTRA_DOCS=['ธมนวรรณ'];
+// แพทย์ที่อยู่ใน pool OPD ทั้งสองครึ่งทุกเดือน ตั้งแต่ พ.ย. 2569 (mIdx 10)
+const ALWAYS_OPD=['ธมนวรรณ'];
+const ALWAYS_OPD_FROM={yearBE:2569, mIdx:10};
 function allDoctorNames(){ return [...new Set([...wardData.doctors.map(d=>d.name), ...EXTRA_DOCS])]; }
 
 // ═══════════════════════════════════════════════
@@ -1422,6 +1425,11 @@ function getOPDPool(mIdx,yearBE){
     if(s.h1&&/^OPD/i.test(s.h1.trim()))h1.push(d.name);
     if(s.h2&&/^OPD/i.test(s.h2.trim()))h2.push(d.name);
   });
+  // แพทย์ที่วน OPD ทุกครึ่งเดือน ตั้งแต่ ALWAYS_OPD_FROM (เดือนก่อนหน้าไม่แตะ — ตารางประกาศแล้ว)
+  const yBE=yearBE||parseInt(document.getElementById('opd-year').value);
+  if(yBE*12+mIdx >= ALWAYS_OPD_FROM.yearBE*12+ALWAYS_OPD_FROM.mIdx){
+    ALWAYS_OPD.forEach(n=>{ if(!h1.includes(n))h1.push(n); if(!h2.includes(n))h2.push(n); });
+  }
   return{h1,h2};
 }
 
