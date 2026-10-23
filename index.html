@@ -813,6 +813,9 @@ const EXTRA_DOCS=['ธมนวรรณ'];
 // แพทย์ที่อยู่ใน pool OPD ทั้งสองครึ่งทุกเดือน ตั้งแต่ พ.ย. 2569 (mIdx 10)
 const ALWAYS_OPD=['ธมนวรรณ'];
 const ALWAYS_OPD_FROM={yearBE:2569, mIdx:10};
+// แพทย์ที่ไม่ออก OPD แล้ว (ตัดออกจาก pool แม้ Loop วอร์ดเป็น OPD) ตั้งแต่ NO_OPD_FROM · Loop วอร์ด/คลินิกพิเศษยังเหมือนเดิม
+const NO_OPD=['นิภาพร'];
+const NO_OPD_FROM={yearBE:2569, mIdx:10};
 // แถว Loop วอร์ดสำหรับแสดงผล/Export = wardData + แพทย์ ALWAYS_OPD (OPD ทุกครึ่ง ตั้งแต่ ALWAYS_OPD_FROM) · ไม่บันทึกลง wardData
 function wardRowsForDisplay(){
   const fromN=ALWAYS_OPD_FROM.yearBE*12+ALWAYS_OPD_FROM.mIdx;
@@ -1538,6 +1541,9 @@ function getOPDPool(mIdx,yearBE){
   const yBE=yearBE||parseInt(document.getElementById('opd-year').value);
   if(yBE*12+mIdx >= ALWAYS_OPD_FROM.yearBE*12+ALWAYS_OPD_FROM.mIdx){
     ALWAYS_OPD.forEach(n=>{ if(!h1.includes(n))h1.push(n); if(!h2.includes(n))h2.push(n); });
+  }
+  if(yBE*12+mIdx >= NO_OPD_FROM.yearBE*12+NO_OPD_FROM.mIdx){
+    return{h1:h1.filter(n=>!NO_OPD.includes(n)), h2:h2.filter(n=>!NO_OPD.includes(n))};
   }
   return{h1,h2};
 }
