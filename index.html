@@ -810,6 +810,19 @@ const EXTRA_DOCS=['ธมนวรรณ'];
 // แพทย์ที่อยู่ใน pool OPD ทั้งสองครึ่งทุกเดือน ตั้งแต่ พ.ย. 2569 (mIdx 10)
 const ALWAYS_OPD=['ธมนวรรณ'];
 const ALWAYS_OPD_FROM={yearBE:2569, mIdx:10};
+// แถว Loop วอร์ดสำหรับแสดงผล/Export = wardData + แพทย์ ALWAYS_OPD (OPD ทุกครึ่ง ตั้งแต่ ALWAYS_OPD_FROM) · ไม่บันทึกลง wardData
+function wardRowsForDisplay(){
+  const fromN=ALWAYS_OPD_FROM.yearBE*12+ALWAYS_OPD_FROM.mIdx;
+  const extra=ALWAYS_OPD.filter(n=>!wardData.doctors.some(d=>d.name===n)).map((n,i)=>{
+    const schedule={};
+    wardData.monthColumns.forEach(k=>{
+      const [mn,y]=k.split(' ');
+      if(parseInt(y)*12+MONTHS_TH.indexOf(mn)>=fromN) schedule[k]={h1:'OPD',h2:'OPD'};
+    });
+    return {seq:wardData.doctors.length+i+1, name:n, isNP:false, schedule};
+  });
+  return [...wardData.doctors, ...extra];
+}
 function allDoctorNames(){ return [...new Set([...wardData.doctors.map(d=>d.name), ...EXTRA_DOCS])]; }
 
 // ═══════════════════════════════════════════════
@@ -1294,7 +1307,7 @@ function renderWardTable(){
         </tr>
       </thead>
       <tbody>
-        ${wardData.doctors.map(d=>{
+        ${wardRowsForDisplay().map(d=>{
           const rowBg=d.isNP?'#1a1230':'var(--sf)';
           const stickyBg=d.isNP?'#1a1230':'var(--sf)';
           return`<tr>
@@ -2264,7 +2277,7 @@ function renderSummary(sched,mIdx,yearBE,perDay){
     </div>
     <div class="tbl-wrap"><table>
       <thead><tr><th>#</th><th>แพทย์</th><th><span class="half-tag">1–15</span></th><th><span class="half-tag">16–31</span></th></tr></thead>
-      <tbody>${wardData.doctors.map(d=>{
+      <tbody>${wardRowsForDisplay().map(d=>{
         const s=(d.schedule&&d.schedule[mName+' '+yearBE])||{h1:'',h2:''};
         return`<tr style="${d.isNP?'background:rgba(188,140,255,.07)':''}">
           <td style="color:var(--mu);font-size:.7rem">${d.seq}</td>
@@ -2440,7 +2453,7 @@ function exportWard(){
   const hdr=['#','แพทย์'];
   M.forEach(m=>{hdr.push(`${m} 1-15`,`${m} 16-31`);});
   const rows=[hdr];
-  wardData.doctors.forEach(d=>{
+  wardRowsForDisplay().forEach(d=>{
     const row=[d.seq,d.name];
     M.forEach(m=>{const s=(d.schedule&&d.schedule[m])||{h1:'',h2:''};row.push(s.h1||'',s.h2||'');});
     rows.push(row);
