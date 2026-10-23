@@ -2585,6 +2585,7 @@ function exportClinic(){
 }
 
 // Export ตาราง OPD รูปแบบประกาศ: วัน | วันที่ | แพทย์เวร | OPD 1..n · ทุกวันในเดือน · เสาร์-อาทิตย์/วันหยุด = แถวเทา
+// คอลัมน์ Med F1 / Med F2 / Med F3 / SU / ICU เว้นว่างให้กรอกเอง
 // ใช้ ExcelJS (โหลดเมื่อกด) เพราะ SheetJS รุ่นฟรีเขียนสี/เส้นตารางไม่ได้ · ช่องแพทย์เวรเว้นว่าง (ระบบไม่มีข้อมูลเวร)
 const EXCELJS_URL='https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js';
 function loadScriptOnce(url){
@@ -2606,16 +2607,17 @@ async function exportOPD(){
   const DAY_TH=['อาทิตย์','จันทร์','อังคาร','พุธ','พฤหัสบดี','ศุกร์','เสาร์'];
   const byDate={}; lastOPDSched.forEach(r=>{ byDate[r.date]=r; });
   const nSlot=Math.max(perDay, ...lastOPDSched.map(r=>r.assigned.length));
+  const EXTRA_COLS=['Med F1','Med F2','Med F3 / SU','ICU'];
 
   const wb=new ExcelJS.Workbook();
   const ws=wb.addWorksheet(`${MONTHS_TH[mIdx]} ${yearBE}`);
-  ws.columns=[{width:13},{width:8},{width:26},...Array.from({length:nSlot},()=>({width:15}))];
+  ws.columns=[{width:13},{width:8},{width:26},...Array.from({length:nSlot},()=>({width:15})),...EXTRA_COLS.map(()=>({width:16}))];
   const font={name:'TH SarabunPSK',size:16};
   const thin={style:'thin',color:{argb:'FF000000'}};
   const border={top:thin,left:thin,bottom:thin,right:thin};
   const fill=c=>({type:'pattern',pattern:'solid',fgColor:{argb:c}});
 
-  const hdr=ws.addRow(['วัน','วันที่','แพทย์เวร',...Array.from({length:nSlot},(_,i)=>`OPD ${i+1}`)]);
+  const hdr=ws.addRow(['วัน','วันที่','แพทย์เวร',...Array.from({length:nSlot},(_,i)=>`OPD ${i+1}`),...EXTRA_COLS]);
   hdr.height=28;
   hdr.eachCell(c=>{ c.font={...font,bold:true}; c.alignment={horizontal:'center',vertical:'middle'}; c.border=border; });
 
@@ -2625,7 +2627,7 @@ async function exportOPD(){
     const r=byDate[ds];
     const off= dow===0 || dow===6 || !!holidays[ds] || !!(r&&r.isHol);
     const slots=Array.from({length:nSlot},(_,i)=> (!off && r) ? (r.assigned[i]||'') : '');
-    const row=ws.addRow([DAY_TH[dow], day, '', ...slots]);
+    const row=ws.addRow([DAY_TH[dow], day, '', ...slots, ...EXTRA_COLS.map(()=>'')]);
     row.height=26;
     row.eachCell({includeEmpty:true},(c,col)=>{
       c.font= col===1 ? {...font,bold:true} : font;
