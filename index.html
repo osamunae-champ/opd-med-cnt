@@ -36,7 +36,7 @@ function setSyncStatus(status){
   el.innerHTML = `<i class="fas ${cfg.icon}" style="color:${cfg.color}"></i> <span style="color:${cfg.color}">${cfg.text}</span>`;
 }
 
-const BASE_KEYS = ['opd_ward_v11','opd_clinic_v11','opd_hol_v11','opd_weight_v11','opd_hide_weight_v11','opd_oncall_v11'];
+const BASE_KEYS = ['opd_ward_v11','opd_clinic_v11','opd_hol_v11','opd_weight_v11','opd_hide_weight_v11'];
 
 window.fbPush = async function(){
   if(typeof isAdmin === 'undefined' || !isAdmin) return;
@@ -982,14 +982,11 @@ function toggleHideWeight(val){
 // STATE — load from localStorage or use defaults
 // ═══════════════════════════════════════════════
 let wardData, clinicSchedule, holidays, lastOPDSched=[];
-let oncallData=null; // แพทย์เวร: {roster, start, overrides} — ดู ONCALL
-// ค่าตั้งต้นแพทย์เวร (ต้องประกาศก่อน loadState/init) · logic อยู่ที่ส่วน ONCALL
-const LS_ONCALL='opd_oncall_v11';
+// แพทย์เวร: รายชื่อ + เลขเริ่ม (ประกาศก่อน init) · logic อยู่ที่ส่วน ONCALL · แลกเวรแก้มือใน Excel หลัง Export
 const DEFAULT_ONCALL={
   roster:['พญ. ณัทอร','พญ. นิภาพร','พญ. ชมพูนุท','พญ. กิติยา','พญ. ชลิตา','นพ. วรเดช','พญ. ทิฆัมพร',
           'นพ. ณัฐพล','พญ. กองพร','พญ. ปิยวดี','พญ. ธีราภรณ์','นพ. อนิวรรต','พญ. พันเทียน'],
-  start:{yearBE:2569, mIdx:10, wd:8, hol:7},
-  overrides:{}
+  start:{yearBE:2569, mIdx:10, wd:8, hol:7}
 };
 let _wardYear=null; // ปีที่เลือกดูในตาราง Loop วอร์ด (คงไว้ตอน render ใหม่)
 let _lastOPDMeta = { mIdx:null, yearBE:null, perDay:null }; // เก็บ meta ของตารางล่าสุด
@@ -1008,11 +1005,6 @@ function loadState(){
     const h=localStorage.getItem(LS_HOL);
     holidays=h?JSON.parse(h):{};
   }catch{holidays={};}
-  try{
-    const o=localStorage.getItem(LS_ONCALL);
-    oncallData=o?JSON.parse(o):JSON.parse(JSON.stringify(DEFAULT_ONCALL));
-    if(!oncallData.overrides) oncallData.overrides={};
-  }catch{oncallData=JSON.parse(JSON.stringify(DEFAULT_ONCALL));}
   // โหลดตาราง OPD ของเดือนที่ selector ชี้อยู่
   try{
     const mIdx  = parseInt(document.getElementById('opd-month')?.value||6);
@@ -1372,11 +1364,11 @@ function filterWardYear(y){
 // ONCALL — แพทย์เวร
 // รายชื่อหลัก 13 คนเรียงตายตัว · ตัวนับ 2 ชุดแยกกัน: วันธรรมดา (จ–ศ ไม่ใช่วันหยุด) / วันหยุด (ส-อา + holidays)
 // แต่ละชุดเดิน 1→13 วนต่อเนื่องข้ามเดือน เริ่มที่ start (พ.ย. 2569: ธรรมดา 8 · หยุด 7 — ต่อจากไฟล์ประกาศ ต.ค. 2569)
-// ชื่อ = overrides[วันที่] (แลกเวร) || roster[เลข-1] · เลขไม่เปลี่ยนเมื่อแลก · เดือนก่อน start = ไม่มีข้อมูล
+// ชื่อ = roster[เลข-1] (ร่างตาม pattern — การแลกเวรจริงแก้มือใน Excel) · เดือนก่อน start = ไม่มีข้อมูล
 // ⚠ เลขขึ้นกับ holidays — เพิ่ม/ลบวันหยุดในอดีตทำให้เลขหลังจากนั้นเลื่อน
 // ═══════════════════════════════════════════════
 function oncallForMonth(mIdx, yearBE){
-  const o=oncallData||DEFAULT_ONCALL, R=o.roster, N=R.length, st=o.start;
+  const o=DEFAULT_ONCALL, R=o.roster, N=R.length, st=o.start;
   if(!N || yearBE*12+mIdx < st.yearBE*12+st.mIdx) return [];
   let wd=st.wd-1, hol=st.hol-1; // index 0-based ของวันถัดไป
   const out=[];
@@ -1390,8 +1382,7 @@ function oncallForMonth(mIdx, yearBE){
       const idx= off ? hol : wd;
       if(off) hol=(hol+1)%N; else wd=(wd+1)%N;
       if(target){
-        const ov=o.overrides&&o.overrides[ds];
-        out.push({date:ds, day:d, dow, off, num:idx+1, name:ov||R[idx], overridden:!!ov, holName:holidays[ds]||''});
+        out.push({date:ds, day:d, dow, off, num:idx+1, name:R[idx], holName:holidays[ds]||''});
       }
     }
     if(target) return out;
@@ -1399,17 +1390,13 @@ function oncallForMonth(mIdx, yearBE){
   }
 }
 function oncallLabel(r){ return r ? `${r.name} ( ${r.num} )` : ''; }
-function saveOncall(){
-  if(!isAdmin){ toast('ไม่มีสิทธิ์แก้ไข — กรุณา login ด้วยรหัส Admin','error'); return; }
-  try{localStorage.setItem(LS_ONCALL,JSON.stringify(oncallData));markSaved();}catch(e){toast('บันทึกไม่ได้: '+e.message,'err');}
-}
 function renderOncall(mIdx, yearBE){
   const el=document.getElementById('oncall-wrap'); if(!el) return;
   const lbl=document.getElementById('oncall-label');
   if(lbl) lbl.textContent=`— ${MONTHS_TH[mIdx]} ${yearBE}`;
   const rows=oncallForMonth(mIdx, yearBE);
   if(!rows.length){
-    const st=(oncallData||DEFAULT_ONCALL).start;
+    const st=DEFAULT_ONCALL.start;
     el.innerHTML=`<div style="color:var(--mu);font-size:.8rem;padding:.5rem">เริ่มรันเลขแพทย์เวรตั้งแต่ ${MONTHS_TH[st.mIdx]} ${st.yearBE} (ก่อนหน้านั้นดูจากไฟล์ประกาศเดิม)</div>`;
     return;
   }
@@ -1417,11 +1404,10 @@ function renderOncall(mIdx, yearBE){
   const cnt={}; rows.forEach(r=>{ cnt[r.name]=(cnt[r.name]||0)+1; });
   const cell=r=>{
     const st=`padding:.3rem .5rem;border-bottom:1px solid var(--bd);${r.off?'background:rgba(125,133,144,.14)':''}`;
-    const click=isAdmin?` onclick="openOncallEdit('${r.date}')" style="cursor:pointer"`:'';
-    return `<tr${click}>
+    return `<tr>
       <td style="${st};color:var(--mu);font-size:.75rem">${DAY_TH[r.dow]} ${r.day}</td>
       <td style="${st};font-size:.7rem;color:${r.off?'var(--ac2)':'var(--mu)'}">${r.off?(r.holName||'หยุด'):'ธรรมดา'}</td>
-      <td style="${st};font-weight:600${r.overridden?';color:var(--ye)':''}" title="${r.overridden?'แลกเวรแล้ว (ตามลำดับ: '+(oncallData.roster[r.num-1]||'')+')':''}">${oncallLabel(r)}</td>
+      <td style="${st};font-weight:600">${oncallLabel(r)}</td>
     </tr>`;
   };
   const half=Math.ceil(rows.length/2);
@@ -1430,58 +1416,11 @@ function renderOncall(mIdx, yearBE){
   const wdLast=[...rows].reverse().find(r=>!r.off), hoLast=[...rows].reverse().find(r=>r.off);
   el.innerHTML=`
     <div style="font-size:.74rem;color:var(--mu);margin-bottom:.6rem">
-      ${isAdmin?'<i class="fas fa-edit" style="color:var(--ac)"></i> กดที่แถวเพื่อแลกเวร (เลขเดินต่อเหมือนเดิม) · ':''}
+      ร่างตามลำดับ (แลกเวรแก้ใน Excel หลัง Export) · 
       เลขสุดท้ายเดือนนี้: วันธรรมดา <b style="color:var(--tx)">${last(wdLast)}</b> · วันหยุด <b style="color:var(--tx)">${last(hoLast)}</b>
-      · <span style="color:var(--ye)">สีเหลือง</span> = แลกเวรแล้ว
     </div>
     <div class="g2">${tbl(rows.slice(0,half))}${tbl(rows.slice(half))}</div>
     <div style="font-size:.72rem;color:var(--mu);margin-top:.6rem">จำนวนเวรเดือนนี้: ${Object.entries(cnt).sort((a,b)=>b[1]-a[1]).map(([n,c])=>`${n.replace(/^(พญ|นพ)\.\s*/,'')} ${c}`).join(' · ')}</div>`;
-}
-function openOncallEdit(ds){
-  if(!isAdmin) return;
-  const [y,m]=ds.split('-').map(Number);
-  const r=oncallForMonth(m-1, y+543).find(x=>x.date===ds); if(!r) return;
-  const R=oncallData.roster, def=R[r.num-1];
-  const old=document.getElementById('oncall-popup'); if(old) old.remove();
-  const popup=document.createElement('div');
-  popup.id='oncall-popup';
-  popup.style.cssText='position:fixed;inset:0;z-index:8000;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:1rem';
-  const item=(n,label)=>`<div onclick="setOncall('${ds}','${n.replace(/'/g,"\\'")}')"
-      style="display:flex;align-items:center;gap:8px;padding:.45rem .8rem;border-radius:8px;cursor:pointer;margin-bottom:2px;${n===r.name?'background:rgba(46,164,255,.12);border:1px solid rgba(46,164,255,.4)':''}"
-      onmouseover="this.style.background='rgba(46,164,255,.08)'" onmouseout="this.style.background='${n===r.name?'rgba(46,164,255,.12)':'transparent'}'">
-      <span style="font-weight:700;flex:1">${n}</span>${label||''}</div>`;
-  popup.innerHTML=`
-    <div style="background:var(--sf);border:1px solid var(--bd2);border-radius:12px;width:100%;max-width:380px;max-height:80vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.6)">
-      <div style="padding:.9rem 1.1rem;border-bottom:1px solid var(--bd);display:flex;align-items:center;gap:8px">
-        <div>
-          <div style="font-weight:700;font-size:.9rem">แพทย์เวร ${r.day}/${m}/${y+543} · ${r.off?'วันหยุด':'วันธรรมดา'} เลข ( ${r.num} )</div>
-          <div style="font-size:.72rem;color:var(--mu)">ตามลำดับ: ${def} · เลือกคนที่มาอยู่แทน</div>
-        </div>
-        <button onclick="document.getElementById('oncall-popup').remove()" style="margin-left:auto;background:none;border:none;color:var(--mu);font-size:1.1rem;cursor:pointer">✕</button>
-      </div>
-      <div style="overflow-y:auto;padding:.5rem">
-        ${r.overridden?`<div onclick="setOncall('${ds}','')" style="padding:.45rem .8rem;border-radius:8px;cursor:pointer;border:1px dashed var(--ac2);margin-bottom:.4rem;color:var(--ac2);font-size:.82rem"><i class="fas fa-undo"></i> คืนตามลำดับ (${def})</div>`:''}
-        ${R.map(n=>item(n, n===def?'<span style="font-size:.68rem;color:var(--mu)">ตามลำดับ</span>':'')).join('')}
-        <div onclick="customOncall('${ds}')" style="padding:.45rem .8rem;border-radius:8px;cursor:pointer;border:1px dashed var(--bd2);margin-top:.4rem;color:var(--mu);font-size:.82rem">✏️ พิมพ์ชื่อเอง...</div>
-      </div>
-    </div>`;
-  popup.addEventListener('click',e=>{ if(e.target===popup) popup.remove(); });
-  document.body.appendChild(popup);
-}
-function setOncall(ds, name){
-  if(!isAdmin) return;
-  const p=document.getElementById('oncall-popup'); if(p) p.remove();
-  const [y,m]=ds.split('-').map(Number);
-  const r=oncallForMonth(m-1, y+543).find(x=>x.date===ds); if(!r) return;
-  const def=oncallData.roster[r.num-1];
-  if(!name || name===def) delete oncallData.overrides[ds]; else oncallData.overrides[ds]=name;
-  saveOncall(); renderOncall(m-1, y+543);
-  toast(`แพทย์เวร ${r.day}/${m}: ${name||def} ✓`);
-}
-function customOncall(ds){
-  const v=prompt('พิมพ์ชื่อแพทย์เวร (เช่น พญ. ชื่อ):','');
-  const p=document.getElementById('oncall-popup'); if(p) p.remove();
-  if(v!==null && v.trim()) setOncall(ds, v.trim());
 }
 
 // ═══════════════════════════════════════════════
