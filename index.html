@@ -2584,17 +2584,26 @@ function exportClinic(){
   toast('Export คลินิกสำเร็จ ✓');
 }
 
-// Export ตาราง OPD รูปแบบประกาศ: วัน | วันที่ | แพทย์เวร | OPD 1..n · ทุกวันในเดือน · เสาร์-อาทิตย์/วันหยุด = แถวเทา
-// คอลัมน์ Med F1 / Med F2 / Med F3 / SU / ICU เว้นว่างให้กรอกเอง
-// ใช้ ExcelJS (โหลดเมื่อกด) เพราะ SheetJS รุ่นฟรีเขียนสี/เส้นตารางไม่ได้ · ช่องแพทย์เวรเว้นว่าง (ระบบไม่มีข้อมูลเวร)
+// Export ตาราง OPD รูปแบบประกาศ (ตามไฟล์ "ตารางเวรรับปรึกษากลุ่มงานอายุรกรรม" ของแผนก)
+// หัวเรื่องรวมเซลล์ · วัน | วันที่ | แพทย์เวร | OPD 1..n | Med F1 | Med F2 | Med F3 / SU | ICU · ทุกวันในเดือน
+// เสาร์-อาทิตย์/วันหยุด = เทา (ช่องแพทย์เวรเทาเข้มกว่า) · ท้ายตาราง Stroke / Neuro จาก Loop วอร์ด (NM + Stroke) + หมายเหตุ
+// ช่องแพทย์เวร / Med F1–F3 / ICU เว้นว่าง · ฟอนต์ Cordia New · ใช้ ExcelJS (โหลดเมื่อกด) เพราะ SheetJS รุ่นฟรีเขียนสี/เส้นไม่ได้
 const EXCELJS_URL='https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js';
 function loadScriptOnce(url){
   return new Promise((res,rej)=>{
-    if(document.querySelector(`script[src="${url}"]`) && window.ExcelJS) return res();
+    if(window.ExcelJS) return res();
     const sc=document.createElement('script'); sc.src=url;
     sc.onload=()=>res(); sc.onerror=()=>rej(new Error('โหลด '+url+' ไม่ได้'));
     document.head.appendChild(sc);
   });
+}
+// ผู้รับผิดชอบ NM + Stroke ของเดือน (จาก Loop วอร์ด) → "ณัทอร" หรือ "1-15 ณัทอร, 16-31 วรเดช"
+function strokeNeuroLabel(mIdx, yearBE){
+  const key=getSchedKey(mIdx,yearBE);
+  const who=hf=>wardData.doctors.filter(d=>/stroke|NM/i.test(((d.schedule&&d.schedule[key])||{})[hf]||'')).map(d=>d.name).join(', ');
+  const a=who('h1'), b=who('h2');
+  if(!a && !b) return '';
+  return a===b ? a : `1-15 ${a||'—'}, 16-31 ${b||'—'}`;
 }
 async function exportOPD(){
   if(!lastOPDSched.length){toast('สร้างตาราง OPD ก่อน');return;}
@@ -2608,18 +2617,35 @@ async function exportOPD(){
   const byDate={}; lastOPDSched.forEach(r=>{ byDate[r.date]=r; });
   const nSlot=Math.max(perDay, ...lastOPDSched.map(r=>r.assigned.length));
   const EXTRA_COLS=['Med F1','Med F2','Med F3 / SU','ICU'];
+  const nCol=3+nSlot+EXTRA_COLS.length;
 
   const wb=new ExcelJS.Workbook();
-  const ws=wb.addWorksheet(`${MONTHS_TH[mIdx]} ${yearBE}`);
-  ws.columns=[{width:13},{width:8},{width:26},...Array.from({length:nSlot},()=>({width:15})),...EXTRA_COLS.map(()=>({width:16}))];
-  const font={name:'TH SarabunPSK',size:16};
+  const ws=wb.addWorksheet(`${MONTHS_TH[mIdx]} ${yearBE}`,{
+    pageSetup:{paperSize:9, orientation:'portrait', fitToPage:true, fitToWidth:1, fitToHeight:0,
+               margins:{left:0.25,right:0.25,top:0.75,bottom:0.75,header:0.3,footer:0.3}}
+  });
+  // ขนาดคอลัมน์ตามไฟล์ต้นฉบับ (A 6.9 · B 4.1 · C 14.1 · D 7.6 · H 9 · K 10 · ที่เหลือ 8.9)
+  const W_OPD=[7.625,8.875,8.875,8.875], W_EXTRA=[9,8.875,8.875,10];
+  ws.columns=[{width:6.875},{width:4.125},{width:14.125},
+    ...Array.from({length:nSlot},(_,i)=>({width:W_OPD[i]||8.875})), ...W_EXTRA.map(w=>({width:w}))];
+  const F=(sz,b)=>({name:'Cordia New',size:sz,bold:!!b});
   const thin={style:'thin',color:{argb:'FF000000'}};
   const border={top:thin,left:thin,bottom:thin,right:thin};
   const fill=c=>({type:'pattern',pattern:'solid',fgColor:{argb:c}});
+  const GRAY='FFD9D9D9', GRAY_DARK='FFBFBFBF';
+  const center={horizontal:'center',vertical:'middle'};
 
+  // หัวเรื่อง
+  const tr=ws.addRow([`ตารางเวรรับปรึกษากลุ่มงานอายุรกรรม ประจำเดือน ${MONTHS_TH[mIdx]} ${yearBE}`]);
+  tr.height=25.9;
+  ws.mergeCells(1,1,1,nCol);
+  const tc=ws.getCell(1,1); tc.font=F(18,true); tc.alignment=center;
+  for(let c=1;c<=nCol;c++) ws.getCell(1,c).border={bottom:thin};
+
+  // หัวตาราง
   const hdr=ws.addRow(['วัน','วันที่','แพทย์เวร',...Array.from({length:nSlot},(_,i)=>`OPD ${i+1}`),...EXTRA_COLS]);
-  hdr.height=28;
-  hdr.eachCell(c=>{ c.font={...font,bold:true}; c.alignment={horizontal:'center',vertical:'middle'}; c.border=border; });
+  hdr.height=21;
+  hdr.eachCell(c=>{ c.font=F(12,true); c.alignment=center; c.border=border; });
 
   for(let day=1; day<=days; day++){
     const ds=`${yearCE}-${String(mIdx+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
@@ -2628,20 +2654,29 @@ async function exportOPD(){
     const off= dow===0 || dow===6 || !!holidays[ds] || !!(r&&r.isHol);
     const slots=Array.from({length:nSlot},(_,i)=> (!off && r) ? (r.assigned[i]||'') : '');
     const row=ws.addRow([DAY_TH[dow], day, '', ...slots, ...EXTRA_COLS.map(()=>'')]);
-    row.height=26;
-    row.eachCell({includeEmpty:true},(c,col)=>{
-      c.font= col===1 ? {...font,bold:true} : font;
-      c.alignment={horizontal:'center',vertical:'middle'};
+    row.height=21;
+    for(let col=1; col<=nCol; col++){
+      const c=row.getCell(col);
+      c.font= col<=2 ? F(11,true) : col===3 ? F(14) : F(11);
+      c.alignment=center;
       c.border=border;
-      if(off) c.fill=fill(col===3?'FFBFBFBF':'FFD9D9D9');
-    });
+      if(off) c.fill=fill(col===3?GRAY_DARK:GRAY);
+    }
   }
+
+  // ท้ายตาราง
+  ws.addRow([]);
+  const sn=strokeNeuroLabel(mIdx,yearBE);
+  const r1=ws.addRow([]); r1.height=18.4;
+  const c1=r1.getCell(3); c1.value=`Stroke / Neuro ${sn}`.trim(); c1.font=F(12); c1.alignment={horizontal:'left',vertical:'middle'};
+  const r2=ws.addRow([]);
+  const c2=r2.getCell(4); c2.value='** กรณีถ้ามีประกาศวันทำการราชการหยุดฉุกเฉินไม่มีการอยู่ชดเชยในเวรนั้น'; c2.font=F(11,true); c2.alignment={horizontal:'left',vertical:'middle'};
 
   const buf=await wb.xlsx.writeBuffer();
   const blob=new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
   const a=document.createElement('a');
   a.href=URL.createObjectURL(blob);
-  a.download=`ตาราง_OPD_${MONTHS_TH[mIdx]}_${yearBE}.xlsx`;
+  a.download=`ตารางเวรรับปรึกษา_อายุรกรรม_${MONTHS_TH[mIdx]}_${yearBE}.xlsx`;
   a.click();
   setTimeout(()=>URL.revokeObjectURL(a.href),1000);
   toast('Export OPD สำเร็จ ✓');

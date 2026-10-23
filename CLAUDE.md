@@ -69,7 +69,7 @@ localStorage (ของแต่ละเครื่อง)  ⇄  Firestore doc
 | `openWardSwap` / `doWardSwap` / `resetWardHalf` | Admin กดช่องในตาราง Loop วอร์ด → แลกตำแหน่งกับแพทย์อีกคนในเดือน/ครึ่งเดียวกัน (ตำแหน่งครบเสมอ) · ช่องที่ต่างจาก `DEFAULT_WARD` ไฮไลต์ (`wardPatternCell`) · คืนค่า pattern ทั้งครึ่งได้ · บันทึกด้วย `saveWard()` → การจัด OPD ใช้ loop ใหม่ผ่าน `getOPDPool()` · ตาราง OPD ที่บันทึกแล้วไม่เปลี่ยนเอง ต้องสร้างใหม่ |
 | `saveDoctorNames()` | เปลี่ยนชื่อใน wardData + clinicSchedule (ไม่แก้ชื่อในตาราง OPD ที่บันทึกไว้แล้ว) |
 | `exportWard/Clinic/Summary/ImportResult` | Excel ผ่าน SheetJS |
-| `exportOPD()` | Excel รูปแบบประกาศ: วัน · วันที่ · แพทย์เวร (เว้นว่าง — ระบบไม่มีข้อมูลเวร) · OPD 1–n · Med F1 / Med F2 / Med F3 / SU / ICU (เว้นว่าง) · ทุกวันในเดือน · เสาร์-อาทิตย์/วันหยุด แถวเทา · ผ่าน ExcelJS |
+| `exportOPD()` | Excel ตามแบบไฟล์ประกาศของแผนก "ตารางเวรรับปรึกษากลุ่มงานอายุรกรรม": หัวเรื่องรวมเซลล์ · วัน · วันที่ · แพทย์เวร · OPD 1–n · Med F1 / F2 / F3 / SU · ICU · ทุกวันในเดือน · เสาร์-อาทิตย์/วันหยุดเทา (ช่องแพทย์เวรเทาเข้ม) · ท้ายตาราง Stroke / Neuro จาก Loop วอร์ด (`strokeNeuroLabel`) + หมายเหตุ · Cordia New · A4 พอดีหน้า · ผ่าน ExcelJS |
 | `exportSettings` / `importSettings` | JSON ของ ward/clinic/holidays/weights (ไม่รวมตาราง OPD) |
 | `handleImport` ... | แท็บ Import: อ่าน Excel นับชื่อในคอลัมน์ OPD 1–4 (ไม่แตะข้อมูลระบบ) |
 
