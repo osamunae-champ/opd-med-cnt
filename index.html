@@ -2584,27 +2584,64 @@ function exportClinic(){
   toast('Export คลินิกสำเร็จ ✓');
 }
 
-function exportOPD(){
-  if(!lastOPDSched.length){toast('สร้างตาราง OPD ก่อน');return;}
-  const mIdx=parseInt(document.getElementById('opd-month').value);
-  const yearBE=parseInt(document.getElementById('opd-year').value);
-  const perDay=parseInt(document.getElementById('opd-per-day').value)||4;
-  const wb=XLSX.utils.book_new();
-  const hdr=['วันที่','วัน','ครึ่งเดือน'];
-  for(let i=1;i<=perDay;i++)hdr.push(`แพทย์ ${i}`);
-  hdr.push('คลินิกพิเศษ','วันหยุด');
-  const rows=[hdr];
-  lastOPDSched.forEach(r=>{
-    const[y,m,d]=r.date.split('-').map(Number);
-    const row=[`${d}/${m}/${y+543}`,DAYS_F[r.dow],r.half==='h1'?'1-15':'16-31'];
-    for(let i=0;i<perDay;i++)row.push(r.assigned[i]||'');
-    row.push(r.clinicDocs.join(', '),r.isHol?r.holName:'');
-    rows.push(row);
+// Export ตาราง OPD รูปแบบประกาศ: วัน | วันที่ | แพทย์เวร | OPD 1..n · ทุกวันในเดือน · เสาร์-อาทิตย์/วันหยุด = แถวเทา
+// ใช้ ExcelJS (โหลดเมื่อกด) เพราะ SheetJS รุ่นฟรีเขียนสี/เส้นตารางไม่ได้ · ช่องแพทย์เวรเว้นว่าง (ระบบไม่มีข้อมูลเวร)
+const EXCELJS_URL='https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js';
+function loadScriptOnce(url){
+  return new Promise((res,rej)=>{
+    if(document.querySelector(`script[src="${url}"]`) && window.ExcelJS) return res();
+    const sc=document.createElement('script'); sc.src=url;
+    sc.onload=()=>res(); sc.onerror=()=>rej(new Error('โหลด '+url+' ไม่ได้'));
+    document.head.appendChild(sc);
   });
-  const ws=XLSX.utils.aoa_to_sheet(rows);
-  ws['!cols']=[{wch:10},{wch:10},{wch:10},...Array(perDay).fill({wch:16}),{wch:40},{wch:20}];
-  XLSX.utils.book_append_sheet(wb,ws,'OPD');
-  XLSX.writeFile(wb,`ตาราง_OPD_${MONTHS_TH[mIdx]}_${yearBE}.xlsx`);
+}
+async function exportOPD(){
+  if(!lastOPDSched.length){toast('สร้างตาราง OPD ก่อน');return;}
+  const mIdx  = _lastOPDMeta.mIdx  != null ? _lastOPDMeta.mIdx  : parseInt(document.getElementById('opd-month').value);
+  const yearBE= _lastOPDMeta.yearBE!= null ? _lastOPDMeta.yearBE: parseInt(document.getElementById('opd-year').value);
+  const perDay= _lastOPDMeta.perDay || parseInt(document.getElementById('opd-per-day').value)||4;
+  try{ await loadScriptOnce(EXCELJS_URL); }catch(e){ toast(e.message,'error'); return; }
+
+  const yearCE=yearBE-543, days=new Date(yearCE,mIdx+1,0).getDate();
+  const DAY_TH=['อาทิตย์','จันทร์','อังคาร','พุธ','พฤหัสบดี','ศุกร์','เสาร์'];
+  const byDate={}; lastOPDSched.forEach(r=>{ byDate[r.date]=r; });
+  const nSlot=Math.max(perDay, ...lastOPDSched.map(r=>r.assigned.length));
+
+  const wb=new ExcelJS.Workbook();
+  const ws=wb.addWorksheet(`${MONTHS_TH[mIdx]} ${yearBE}`);
+  ws.columns=[{width:13},{width:8},{width:26},...Array.from({length:nSlot},()=>({width:15}))];
+  const font={name:'TH SarabunPSK',size:16};
+  const thin={style:'thin',color:{argb:'FF000000'}};
+  const border={top:thin,left:thin,bottom:thin,right:thin};
+  const fill=c=>({type:'pattern',pattern:'solid',fgColor:{argb:c}});
+
+  const hdr=ws.addRow(['วัน','วันที่','แพทย์เวร',...Array.from({length:nSlot},(_,i)=>`OPD ${i+1}`)]);
+  hdr.height=28;
+  hdr.eachCell(c=>{ c.font={...font,bold:true}; c.alignment={horizontal:'center',vertical:'middle'}; c.border=border; });
+
+  for(let day=1; day<=days; day++){
+    const ds=`${yearCE}-${String(mIdx+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+    const dow=new Date(yearCE,mIdx,day).getDay();
+    const r=byDate[ds];
+    const off= dow===0 || dow===6 || !!holidays[ds] || !!(r&&r.isHol);
+    const slots=Array.from({length:nSlot},(_,i)=> (!off && r) ? (r.assigned[i]||'') : '');
+    const row=ws.addRow([DAY_TH[dow], day, '', ...slots]);
+    row.height=26;
+    row.eachCell({includeEmpty:true},(c,col)=>{
+      c.font= col===1 ? {...font,bold:true} : font;
+      c.alignment={horizontal:'center',vertical:'middle'};
+      c.border=border;
+      if(off) c.fill=fill(col===3?'FFBFBFBF':'FFD9D9D9');
+    });
+  }
+
+  const buf=await wb.xlsx.writeBuffer();
+  const blob=new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download=`ตาราง_OPD_${MONTHS_TH[mIdx]}_${yearBE}.xlsx`;
+  a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href),1000);
   toast('Export OPD สำเร็จ ✓');
 }
 

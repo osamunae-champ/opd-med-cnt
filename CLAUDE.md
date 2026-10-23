@@ -7,7 +7,7 @@
 - **ไฟล์เดียว `index.html`** (~2,750 บรรทัด · HTML + CSS + JS ในไฟล์เดียว) ไม่มี build ไม่มี npm ไม่มีเทสต์อัตโนมัติ
 - **Deploy:** GitHub Pages จาก branch `main` → https://osamunae-champ.github.io/opd-med-cnt/
   **push ขึ้น `main` = ขึ้นเว็บจริงทันที (~1 นาที)**
-- **ไลบรารีจาก CDN:** Firebase compat SDK 9.23.0 (app + firestore) · SheetJS `xlsx` 0.18.5 · Font Awesome 6.4.0 · Google Fonts (Sarabun, Chakra Petch)
+- **ไลบรารีจาก CDN:** Firebase compat SDK 9.23.0 (app + firestore) · SheetJS `xlsx` 0.18.5 · ExcelJS 4.4.0 (โหลดเมื่อกด Export ตาราง OPD เท่านั้น — SheetJS รุ่นฟรีเขียนสี/เส้นไม่ได้) · Font Awesome 6.4.0 · Google Fonts (Sarabun, Chakra Petch)
 - ประวัติ commit เดิมเป็น "Delete index.html / Add files via upload" (เจ้าของอัปโหลดผ่านหน้าเว็บ GitHub) → **`git pull` ก่อนแก้ทุกครั้ง**
 
 ## สถาปัตยกรรมข้อมูล
@@ -68,7 +68,8 @@ localStorage (ของแต่ละเครื่อง)  ⇄  Firestore doc
 | `saveWard` / `saveClinic` / `saveHol` / `saveWeights` → `markSaved()` → `fbPush()` | ทุกการบันทึกขึ้น cloud |
 | `openWardSwap` / `doWardSwap` / `resetWardHalf` | Admin กดช่องในตาราง Loop วอร์ด → แลกตำแหน่งกับแพทย์อีกคนในเดือน/ครึ่งเดียวกัน (ตำแหน่งครบเสมอ) · ช่องที่ต่างจาก `DEFAULT_WARD` ไฮไลต์ (`wardPatternCell`) · คืนค่า pattern ทั้งครึ่งได้ · บันทึกด้วย `saveWard()` → การจัด OPD ใช้ loop ใหม่ผ่าน `getOPDPool()` · ตาราง OPD ที่บันทึกแล้วไม่เปลี่ยนเอง ต้องสร้างใหม่ |
 | `saveDoctorNames()` | เปลี่ยนชื่อใน wardData + clinicSchedule (ไม่แก้ชื่อในตาราง OPD ที่บันทึกไว้แล้ว) |
-| `exportWard/Clinic/OPD/Summary/ImportResult` | Excel ผ่าน SheetJS |
+| `exportWard/Clinic/Summary/ImportResult` | Excel ผ่าน SheetJS |
+| `exportOPD()` | Excel รูปแบบประกาศ: วัน · วันที่ · แพทย์เวร (เว้นว่าง — ระบบไม่มีข้อมูลเวร) · OPD 1–n · ทุกวันในเดือน · เสาร์-อาทิตย์/วันหยุด แถวเทา · ผ่าน ExcelJS |
 | `exportSettings` / `importSettings` | JSON ของ ward/clinic/holidays/weights (ไม่รวมตาราง OPD) |
 | `handleImport` ... | แท็บ Import: อ่าน Excel นับชื่อในคอลัมน์ OPD 1–4 (ไม่แตะข้อมูลระบบ) |
 
